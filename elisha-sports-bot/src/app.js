@@ -1,8 +1,10 @@
 import express from 'express';
 import { healthRouter } from './routes/health.js';
 import { webhookRouter } from './routes/webhook.js';
+import { footballMlRouter } from './routes/footballMl.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { defaultRateLimiter } from './middleware/rateLimiter.js';
+
 import { requestIdMiddleware } from './middleware/requestId.js';
 
 export function createApp() {
@@ -25,6 +27,7 @@ export function createApp() {
   });
   app.use('/health', healthRouter);
   app.use('/webhook', webhookRouter);
+  app.use('/api/football-ml', footballMlRouter);
 
   app.use((req, res) => {
     res.status(404).json({ ok: false, message: 'Route not found', requestId: req.id });

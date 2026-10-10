@@ -1,0 +1,41 @@
+name: Football Analytics CI
+
+on:
+  push:
+    branches: [main, "feature/**"]
+    paths:
+      - "elisha-sports-bot/football-analytics/**"
+      - ".github/workflows/football-analytics-ci.yml"
+  pull_request:
+    paths:
+      - "elisha-sports-bot/football-analytics/**"
+      - ".github/workflows/football-analytics-ci.yml"
+
+jobs:
+  python-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: elisha-sports-bot/football-analytics
+    steps:
+      - name: Check out the repository, excluding the malformed legacy path
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/elisha-sports-bot/src/services/commandService.js*
+            /elisha-sports-bot/src/services/commandService.js
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: elisha-sports-bot/football-analytics/requirements.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Validate synthetic fixture data
+        run: python download_data.py --input data/synthetic_matches.csv
+      - name: Train baseline models and report holdout metrics
+        run: python train.py --data data/synthetic_matches.csv
+      - name: Run Python tests
+        run: pytest -q

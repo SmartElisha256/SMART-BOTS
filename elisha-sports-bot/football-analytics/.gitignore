@@ -1,0 +1,8 @@
+models/*
+!models/.gitkeep
+predictions/*
+!predictions/.gitkeep
+__pycache__/
+.pytest_cache/
+.venv/
+*.py[cod]

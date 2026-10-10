@@ -38,6 +38,8 @@ jobs:
           node-version: 20
       - name: Install dependencies
         run: npm install
+      - name: Run football ML route tests
+        run: node --test tests/football-ml.test.js
       - name: Run tests
         run: npm test
       - name: Validate messaging configuration

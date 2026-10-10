@@ -1,0 +1,108 @@
+"""Generate a fixture prediction from trained artifacts and validated history."""
+from __future__ import annotations
+import argparse, json, math, sys
+from pathlib import Path
+import numpy as np
+import joblib
+from features import FEATURES, load_matches, build_training_frame, team_form, _features_for
+from collections import defaultdict, deque
+
+def poisson_pmf(k: int, rate: float) -> float:
+    rate = max(0.05, min(float(rate), 6.0))
+    return math.exp(-rate) * rate ** k / math.factorial(k)
+
+def predict(payload: dict, data_path="data/synthetic_matches.csv", models_dir="models") -> dict:
+    if not isinstance(payload, dict):
+        raise ValueError("Request body must be a JSON object.")
+    home, away = payload.get("home_team"), payload.get("away_team")
+    if not isinstance(home, str) or not home.strip() or len(home.strip()) > 80:
+        raise ValueError("home_team must be a non-empty string of at most 80 characters.")
+    if not isinstance(away, str) or not away.strip() or len(away.strip()) > 80:
+        raise ValueError("away_team must be a non-empty string of at most 80 characters.")
+    home, away = home.strip(), away.strip()
+    if home.casefold() == away.casefold():
+        raise ValueError("home_team and away_team must be different.")
+    kickoff = payload.get("kickoff")
+    if kickoff is not None and not isinstance(kickoff, str):
+        raise ValueError("kickoff must be an ISO date/time string or null.")
+    try:
+        cutoff = np.datetime64(kickoff.replace("Z", "")) if kickoff else None
+    except Exception as exc:
+        raise ValueError("kickoff must be a valid ISO date/time.") from exc
+    raw = load_matches(data_path)
+    if cutoff is not None:
+        raw = raw[raw["match_date"].dt.tz_convert(None) < cutoff]
+    if len(raw) < 20:
+        raise ValueError("At least 20 historical matches before kickoff are required.")
+    models = Path(models_dir)
+    needed = [models / "result.joblib", models / "home_goals.joblib", models / "away_goals.joblib"]
+    if not all(path.exists() for path in needed):
+        raise FileNotFoundError("Models are not trained. Run: python train.py --data data/synthetic_matches.csv")
+    result_artifact = joblib.load(needed[0])
+    home_model, away_model = joblib.load(needed[1]), joblib.load(needed[2])
+    history = defaultdict(lambda: deque(maxlen=5))
+    for row in raw.sort_values("match_date").itertuples(index=False):
+        hg, ag = int(row.home_goals), int(row.away_goals)
+        history[row.home_team].append((hg, ag, 3 if hg > ag else (1 if hg == ag else 0)))
+        history[row.away_team].append((ag, hg, 3 if ag > hg else (1 if ag == hg else 0)))
+    feats = _features_for(home, away, history)
+    X = [[float(feats[name]) for name in FEATURES]]
+    artifact = result_artifact
+    encoded = artifact["model"].predict_proba(X)[0]
+    labels = artifact["encoder"].inverse_transform(artifact["model"].classes_)
+    result_probs = {str(label): float(prob) for label, prob in zip(labels, encoded)}
+    # Fill any absent class conservatively; normalize for a valid probability distribution.
+    result_probs = {label: max(0.0, result_probs.get(label, 0.0)) for label in ("H", "D", "A")}
+    total = sum(result_probs.values())
+    result_probs = {k: v / total for k, v in result_probs.items()}
+    home_xg = max(0.05, min(6.0, float(home_model.predict(X)[0])))
+    away_xg = max(0.05, min(6.0, float(away_model.predict(X)[0])))
+    home_pmf = [poisson_pmf(k, home_xg) for k in range(10)]
+    away_pmf = [poisson_pmf(k, away_xg) for k in range(10)]
+    scores = []
+    for hg in range(8):
+        for ag in range(8):
+            scores.append({"score": f"{hg}-{ag}", "probability": home_pmf[hg] * away_pmf[ag]})
+    scores.sort(key=lambda item: item["probability"], reverse=True)
+    goal_lines = {}
+    for line in (0.5, 1.5, 2.5, 3.5):
+        over = sum(home_pmf[hg] * away_pmf[ag] for hg in range(10) for ag in range(10) if hg + ag > line)
+        goal_lines[f"over_{str(line).replace('.', '_')}"] = float(over)
+        goal_lines[f"under_{str(line).replace('.', '_')}"] = float(1.0 - over)
+    btts_yes = sum(home_pmf[hg] * away_pmf[ag] for hg in range(1, 10) for ag in range(1, 10))
+    result = {
+      "fixture": {"home_team": home, "away_team": away, "competition": payload.get("competition"), "kickoff": kickoff},
+      "data_quality": {"status": "available", "historical_matches": int(len(raw)), "warnings": [
+        "Synthetic sample data is not evidence of real-world accuracy." if ("source" in raw and (raw["source"] == "synthetic").all()) else "Model has not been independently validated on live competition data.",
+        "Predictions are estimates, not guarantees."
+      ]},
+      "match_result": {"home_win": result_probs["H"], "draw": result_probs["D"], "away_win": result_probs["A"]},
+      "double_chance": {"1X": result_probs["H"] + result_probs["D"], "X2": result_probs["D"] + result_probs["A"], "12": result_probs["H"] + result_probs["A"]},
+      "goal_markets": goal_lines,
+      "btts": {"yes": float(btts_yes), "no": float(1.0 - btts_yes)},
+      "expected_goals": {"home": home_xg, "away": away_xg},
+      "correct_score": scores[:5],
+      "team_form": {"home": team_form(raw, home, as_of=kickoff), "away": team_form(raw, away, as_of=kickoff)},
+      "confidence": {"level": "low" if len(raw) < 100 else "moderate", "top_result_probability": max(result_probs.values()), "warnings": ["Synthetic or limited historical data can make estimates unreliable."]},
+      "model": {"version": "baseline-random-forest-poisson-v1", "trained_until": str(raw["match_date"].max()), "evaluation_summary": str((models / "evaluation.json").read_text()) if (models / "evaluation.json").exists() else None}
+    }
+    return result
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--request-stdin", action="store_true")
+    parser.add_argument("--data", default="data/synthetic_matches.csv")
+    parser.add_argument("--models-dir", default="models")
+    parser.add_argument("--home-team")
+    parser.add_argument("--away-team")
+    parser.add_argument("--kickoff")
+    args = parser.parse_args()
+    try:
+        payload = json.load(sys.stdin) if args.request_stdin else {"home_team": args.home_team, "away_team": args.away_team, "kickoff": args.kickoff}
+        print(json.dumps(predict(payload, args.data, args.models_dir), allow_nan=False))
+    except Exception as exc:
+        print(json.dumps({"error": str(exc)}))
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

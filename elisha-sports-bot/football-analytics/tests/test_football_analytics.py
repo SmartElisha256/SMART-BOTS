@@ -1,0 +1,90 @@
+import json
+from pathlib import Path
+import sys
+import pandas as pd
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from features import DataQualityError, load_matches, build_training_frame, FEATURES
+from train import main as _train_main
+from predict import predict
+
+DATA = ROOT / "data" / "synthetic_matches.csv"
+
+def test_duplicate_detection(tmp_path):
+    df = pd.read_csv(DATA)
+    df = pd.concat([df, df.iloc[[0]]], ignore_index=True)
+    path = tmp_path / "dupes.csv"; df.to_csv(path, index=False)
+    with pytest.raises(DataQualityError, match="Duplicate"):
+        load_matches(path)
+
+def test_feature_generation_uses_prior_matches_only():
+    df = load_matches(DATA)
+    frame = build_training_frame(df)
+    assert len(frame) == len(df)
+    assert all(name in frame.columns for name in FEATURES)
+    assert frame.iloc[0]["home_matches_seen"] == 0
+    assert frame.iloc[0]["away_matches_seen"] == 0
+    assert frame.iloc[1]["home_matches_seen"] <= 1
+
+def test_missing_data_handling(tmp_path):
+    df = pd.read_csv(DATA).drop(columns=["home_goals"])
+    path = tmp_path / "missing.csv"; df.to_csv(path, index=False)
+    with pytest.raises(DataQualityError, match="Missing required"):
+        load_matches(path)
+
+def test_invalid_date_and_bad_team_name(tmp_path):
+    df = pd.read_csv(DATA); df.loc[0, "match_date"] = "not-a-date"
+    path = tmp_path / "date.csv"; df.to_csv(path, index=False)
+    with pytest.raises(DataQualityError, match="match_date"):
+        load_matches(path)
+    df = pd.read_csv(DATA); df.loc[0, "home_team"] = " "
+    path = tmp_path / "team.csv"; df.to_csv(path, index=False)
+    with pytest.raises(DataQualityError, match="team name"):
+        load_matches(path)
+
+def test_training_and_prediction_schema(tmp_path):
+    import joblib
+    from sklearn.ensemble import RandomForestClassifier
+    from train import main
+    import os
+    old = os.getcwd()
+    try:
+        os.chdir(ROOT)
+        import sys
+        sys.argv = ["train.py", "--data", str(DATA), "--models-dir", str(tmp_path)]
+        main()
+        result = predict({"home_team": "Lakeside FC", "away_team": "Hill United"}, str(DATA), str(tmp_path))
+    finally:
+        os.chdir(old)
+    for key in ("match_result", "double_chance", "goal_markets", "btts", "expected_goals", "correct_score", "team_form", "confidence"):
+        assert key in result
+    assert set(result["match_result"]) == {"home_win", "draw", "away_win"}
+
+def test_probability_validity_and_market_bounds(tmp_path):
+    import os
+    old = os.getcwd()
+    try:
+        os.chdir(ROOT)
+        import sys
+        sys.argv = ["train.py", "--data", str(DATA), "--models-dir", str(tmp_path)]
+        from train import main
+        main()
+        p = predict({"home_team": "Lakeside FC", "away_team": "Hill United"}, str(DATA), str(tmp_path))
+    finally:
+        os.chdir(old)
+    r = p["match_result"]
+    assert all(0 <= value <= 1 for value in r.values())
+    assert sum(r.values()) == pytest.approx(1.0)
+    d = p["double_chance"]
+    assert d["1X"] == pytest.approx(r["home_win"] + r["draw"])
+    assert d["X2"] == pytest.approx(r["draw"] + r["away_win"])
+    assert d["12"] == pytest.approx(r["home_win"] + r["away_win"])
+    assert all(0 <= value <= 1 for value in p["goal_markets"].values())
+    assert p["btts"]["yes"] + p["btts"]["no"] == pytest.approx(1.0)
+    assert all(0 <= item["probability"] <= 1 for item in p["correct_score"])
+
+def test_invalid_fixture_request():
+    with pytest.raises(ValueError):
+        predict({"home_team": "Same FC", "away_team": "Same FC"}, str(DATA), "missing-models")
