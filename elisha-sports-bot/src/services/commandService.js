@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { upsertUser, findUserByPhone } from './userService.js';
 import { getUserPreferences, updateUserPreferences } from './preferencesService.js';
 import { getUserSubscriptions, subscribeUser, unsubscribeUser } from './subscriptionService.js';
-import { getUpcomingFixtures, getLeagueTable, getTeamFormStats, getHeadToHeadRecord } from './sportsService.js';
+import { getUpcomingFixtures, getLeagueTable, getTeamFormStats, getHeadToHeadRecord, getHistoricalSeasonFixtures } from './sportsService.js';
+import { formatSeasonReport } from './historicalSeasonService.js';
 import { analyzeMatch } from './analysisService.js';
 import { logger } from '../utils/logger.js';
 
@@ -73,6 +74,10 @@ export async function processIncomingMessage(input) {
       case 'analysis':
         return await handleAnalyzeCommand(args);
 
+      case 'season':
+      case 'historical':
+        return await handleSeasonCommand(args);
+
       case 'start':
         await updateUserPreferences(sender, { notifications_enabled: true });
         return 'Notifications enabled. You will now receive match alerts.';
@@ -102,7 +107,8 @@ Available commands:
 • TABLE — league standings
 • FORM [TEAM] — recent results for a team
 • H2H [TEAM A] vs [TEAM B] — head-to-head stats
-• ANALYZE [TEAM A] vs [TEAM B] — AI match analysis
+• ANALYZE [TEAM A] vs [TEAM B] — recent-statistics analysis
+• SEASON [LEAGUE] [YEAR] — historical season summary
 • HELP — usage guide
 • START — enable notifications
 • STOP — disable notifications`;
@@ -127,6 +133,9 @@ H2H Manchester City vs Liverpool
 
 ANALYZE Arsenal vs Chelsea
   Compares recent form and head-to-head data; AI analysis is optional.
+
+SEASON Premier League 2023
+  Summarizes completed fixtures, points, goals, and home/away records for a historical season.
 
 LIVE
   Shows current live scores (when available).
@@ -267,6 +276,19 @@ async function handleH2HCommand(args) {
   }
 }
 
+async function handleSeasonCommand(args) {
+  const match = String(args ?? '').trim().match(/^(.*?)(?:\\s+)?(20\\d{2})$/);
+  if (!match) return 'Usage: SEASON Premier League 2023';
+  const league = match[1].trim() || 'Premier League';
+  const season = Number(match[2]);
+  try {
+    const fixtures = await getHistoricalSeasonFixtures({ league, season });
+    return formatSeasonReport({ league, season, fixtures, limit: 10 });
+  } catch (error) {
+    logger.warn({ error, league, season }, 'Historical season report unavailable');
+    return `Could not load historical data for ${league} ${season}. Check the configured data provider, API key, and historical-season access.`;
+  }
+}
 export default processIncomingMessage;
 
 
