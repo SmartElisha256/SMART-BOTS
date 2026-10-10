@@ -11,7 +11,7 @@ const commandRequestSchema = z.object({
   provider: z.enum(['whatsapp', 'callmebot', 'mock']).default('whatsapp')
 });
 
-const COMMAND_REGEX = /^([a-z]+)(?:\\s+(.+))?$/i;
+const COMMAND_REGEX = /^([a-z]+)(?:\s+(.+))?$/i;
 
 export function parseCommand(input) {
   const normalized = String(input).trim().toLowerCase();
@@ -239,7 +239,7 @@ async function handleH2HCommand(args) {
   }
 
   try {
-    const parts = args.split(/\\s+vs?\\s+/i);
+    const parts = args.split(/\s+vs?\s+/i);
     if (parts.length !== 2) {
       return 'Usage: H2H Manchester City vs Liverpool';
     }
