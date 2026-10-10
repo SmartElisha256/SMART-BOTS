@@ -90,7 +90,7 @@ def build_training_frame(df: pd.DataFrame, window: int = 5) -> pd.DataFrame:
 
 def team_form(df: pd.DataFrame, team: str, as_of: str | None = None, limit: int = 5) -> dict:
     """Summarize a team's latest completed matches before as_of."""
-    cutoff = pd.Timestamp(as_of, tz="UTC") if as_of else pd.Timestamp.now(tz="UTC")
+    cutoff = pd.to_datetime(as_of, utc=True) if as_of else pd.Timestamp.now(tz="UTC")
     past = df[(df["match_date"] < cutoff) & ((df["home_team"] == team) | (df["away_team"] == team))]
     past = past.sort_values("match_date").tail(limit)
     matches = []
