@@ -11,7 +11,7 @@ const commandRequestSchema = z.object({
   provider: z.enum(['whatsapp', 'callmebot', 'mock']).default('whatsapp')
 });
 
-const COMMAND_REGEX = /^([a-z]+)(?:\s+(.+))?$/i;
+const COMMAND_REGEX = /^([a-z0-9]+)(?:\s+(.+))?$/i;
 
 export function parseCommand(input) {
   const normalized = String(input).trim().toLowerCase();
