@@ -24,10 +24,9 @@ jobs:
       DATABASE_URL: postgresql://postgres:change-me@localhost:5432/elisha_sports_bot
       REDIS_URL: redis://localhost:6379
     steps:
-      - name: Check out repository without the malformed legacy path
+      - name: Check out the pull request revision, excluding the malformed legacy path
         uses: actions/checkout@v4
         with:
-          ref: repair/elisha-sports-bot-stability
           sparse-checkout-cone-mode: false
           sparse-checkout: |
             /*
