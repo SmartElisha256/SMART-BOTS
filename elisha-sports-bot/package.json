@@ -8,7 +8,12 @@
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
     "prod": "NODE_ENV=production node src/server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "test:commands": "node --test tests/commands.test.js",
+    "test:sports": "node --test tests/sports.test.js",
+    "test:messaging": "node --test tests/messaging.test.js",
+    "validate:messaging": "node src/bin/validate-messaging.js",
+    "validate:env": "node -e \"import { validateEnvironment } from './src/config/env.js'; console.log(JSON.stringify(validateEnvironment(), null, 2));\""
   },
   "keywords": [
     "whatsapp",
