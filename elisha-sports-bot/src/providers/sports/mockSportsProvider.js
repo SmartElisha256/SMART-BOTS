@@ -17,9 +17,25 @@ const table = [
 ];
 
 export class MockSportsProvider extends SportsDataProvider {
-  async getFixtures({ limit = 3, onlyResults = false } = {}) {
-    const selected = fixtures.filter((match) => onlyResults ? match.score : true).slice(0, limit);
+  async getFixtures({ limit = 3, onlyResults = false, liveOnly = false } = {}) {
+    // This provider is demonstration data, never a source of real live scores.
+    if (liveOnly) return [];
+    const now = Date.now();
+    const selected = fixtures.filter((match) => {
+      const isFuture = new Date(match.time).getTime() > now;
+      return onlyResults ? Boolean(match.score) : isFuture && !match.score;
+    }).slice(0, limit);
     return selected;
+  }
+
+  async getTeamFormStats() {
+    // No invented form records: use a real provider before exposing form stats.
+    return [];
+  }
+
+  async getHeadToHeadRecord() {
+    // No invented H2H records: use a real provider before exposing H2H stats.
+    return null;
   }
 
   async getLeagueTable() {
