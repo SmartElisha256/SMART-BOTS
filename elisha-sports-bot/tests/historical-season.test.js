@@ -13,7 +13,7 @@ const fixtures = [
 test('summarizes completed fixtures and excludes scheduled fixtures', () => {
   const result = summarizeSeasonFixtures(fixtures);
   assert.equal(result.matches, 4); assert.equal(result.teams, 3); assert.equal(result.totalGoals, 10); assert.equal(result.averageGoalsPerMatch, 2.5);
-  assert.equal(result.table[0].team, 'Alpha FC'); assert.equal(result.table[0].points, 7); assert.equal(result.table[0].home.played, 2); assert.equal(result.table[0].away.played, 1);
+  assert.equal(result.table[0].team, 'Alpha FC'); assert.equal(result.table[0].points, 7); assert.equal(result.table[0].home.played, 1); assert.equal(result.table[0].away.played, 2);
 });
 
 test('returns a clear message when historical results are missing', () => {
