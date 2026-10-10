@@ -3,6 +3,7 @@ import { upsertUser, findUserByPhone } from './userService.js';
 import { getUserPreferences, updateUserPreferences } from './preferencesService.js';
 import { getUserSubscriptions, subscribeUser, unsubscribeUser } from './subscriptionService.js';
 import { getUpcomingFixtures, getLeagueTable, getTeamFormStats, getHeadToHeadRecord } from './sportsService.js';
+import { analyzeMatch } from './analysisService.js';
 import { logger } from '../utils/logger.js';
 
 const commandRequestSchema = z.object({
@@ -68,6 +69,10 @@ export async function processIncomingMessage(input) {
       case 'h2h':
         return await handleH2HCommand(args);
 
+      case 'analyze':
+      case 'analysis':
+        return await handleAnalyzeCommand(args);
+
       case 'start':
         await updateUserPreferences(sender, { notifications_enabled: true });
         return 'Notifications enabled. You will now receive match alerts.';
@@ -97,6 +102,7 @@ Available commands:
 • TABLE — league standings
 • FORM [TEAM] — recent results for a team
 • H2H [TEAM A] vs [TEAM B] — head-to-head stats
+• ANALYZE [TEAM A] vs [TEAM B] — AI match analysis
 • HELP — usage guide
 • START — enable notifications
 • STOP — disable notifications`;
@@ -118,6 +124,9 @@ FORM Arsenal
 
 H2H Manchester City vs Liverpool
   Shows historical head-to-head record.
+
+ANALYZE Arsenal vs Chelsea
+  Compares recent form and head-to-head data; AI analysis is optional.
 
 LIVE
   Shows current live scores (when available).
@@ -149,7 +158,7 @@ async function handleFixturesCommand(args) {
       })
       .join('\n\n');
 
-    return `⚠️ DEMO DATA — not live or official\n\n📅 SAMPLE FIXTURES\n\n${list}`;
+    return fixtures[0]?.source === 'api-football' ? `📅 UPCOMING FIXTURES\n\n${list}\n\nSource: football data API` : `⚠️ DEMO DATA — not live or official\n\n📅 SAMPLE FIXTURES\n\n${list}`;
   } catch (error) {
     logger.error({ error }, 'Error fetching fixtures');
     return 'Could not fetch fixtures. Please try again.';
@@ -194,7 +203,7 @@ async function handleTableCommand(args) {
       )
       .join('\n');
 
-    return `⚠️ DEMO DATA — not live or official\n\n📊 SAMPLE LEAGUE TABLE - ${league}\n\n${list}`;
+    return table[0]?.source === 'api-football' ? `📊 LEAGUE TABLE - ${league}\n\n${list}\n\nSource: football data API` : `⚠️ DEMO DATA — not live or official\n\n📊 SAMPLE LEAGUE TABLE - ${league}\n\n${list}`;
   } catch (error) {
     logger.error({ error }, 'Error fetching table');
     return 'Could not fetch standings. Please try again.';
@@ -259,3 +268,26 @@ async function handleH2HCommand(args) {
 }
 
 export default processIncomingMessage;
+
+
+async function handleAnalyzeCommand(args) {
+  if (!args || !/\s+vs?\s+/i.test(args)) {
+    return 'Usage: ANALYZE Arsenal vs Chelsea';
+  }
+  const parts = args.split(/\s+vs?\s+/i);
+  if (parts.length !== 2 || !parts[0].trim() || !parts[1].trim()) {
+    return 'Usage: ANALYZE Arsenal vs Chelsea';
+  }
+  const [teamA, teamB] = parts.map((part) => part.trim());
+  try {
+    const [formA, formB, h2h] = await Promise.all([
+      getTeamFormStats(teamA, { limit: 5 }),
+      getTeamFormStats(teamB, { limit: 5 }),
+      getHeadToHeadRecord(teamA, teamB)
+    ]);
+    return await analyzeMatch({ teamA, teamB, formA, formB, h2h });
+  } catch (error) {
+    logger.error({ error, teamA, teamB }, 'Error analyzing match');
+    return 'I could not analyze that match because the sports data service failed. Please try again later.';
+  }
+}
