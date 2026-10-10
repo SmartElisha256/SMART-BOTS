@@ -19,7 +19,7 @@ export async function testDatabaseConnection() {
     const result = await pool.query('SELECT 1 AS ok');
     return { ok: true, result: result.rows[0] };
   } catch (error) {
-    return { ok: false, error: error.message };
+    return { ok: false, message: error.message };
   }
 }
 
