@@ -86,6 +86,22 @@ export async function getHeadToHeadRecord(teamA, teamB) {
   return record;
 }
 
+export async function getHistoricalSeasonFixtures({ league = 'Premier League', season } = {}) {
+  const year = Number(season);
+  if (!Number.isInteger(year) || year < 2000 || year > new Date().getFullYear()) {
+    throw new Error('Season must be a valid year from 2000 through the current year');
+  }
+  const provider = getSportsDataProvider();
+  if (typeof provider.getSeasonFixtures !== 'function') {
+    throw new Error('The configured sports-data provider does not support historical season fixtures');
+  }
+  const cacheKey = generateCacheKey('historical-season', league.toLowerCase(), String(year));
+  const cached = await getCached(cacheKey);
+  if (cached) return cached;
+  const fixtures = await provider.getSeasonFixtures({ league, season: year });
+  await setCached(cacheKey, fixtures, 86400);
+  return fixtures;
+}
 export async function getSportsSummary() {
   return {
     fixtures: await getUpcomingFixtures({ limit: 3 }),
