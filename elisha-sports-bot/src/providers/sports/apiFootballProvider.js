@@ -58,7 +58,7 @@ export class ApiFootballProvider extends SportsDataProvider {
       home: row.teams?.home?.name ?? 'Home team',
       away: row.teams?.away?.name ?? 'Away team',
       time: row.fixture?.date,
-      score: row.goals?.home !== null && row.goals?.away !== null ? `${row.goals.home}-${row.goals.away}` : null,
+      score: row.goals?.home != null && row.goals?.away != null ? `${row.goals.home}-${row.goals.away}` : null,
       status: row.fixture?.status?.long ?? row.fixture?.status?.short ?? 'Scheduled',
       elapsed: row.fixture?.status?.elapsed ?? null,
       source: 'api-football'
