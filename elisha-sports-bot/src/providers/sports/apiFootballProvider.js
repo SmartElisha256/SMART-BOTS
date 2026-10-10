@@ -142,7 +142,14 @@ export class ApiFootballProvider extends SportsDataProvider {
       throw new Error('Season must be a year from 2000 through the current year');
     }
     const leagueId = await this.resolveLeagueId(league);
-    const rows = await this.request('fixtures', { league: leagueId, season: year, timezone: 'Africa/Kampala' });
+    const rows = [];
+    // API-Football paginates fixture responses (commonly 100 rows per page).
+    // Cap the loop so an unusual provider response cannot run indefinitely.
+    for (let page = 1; page <= 10; page += 1) {
+      const batch = await this.request('fixtures', { league: leagueId, season: year, page, timezone: 'Africa/Kampala' });
+      rows.push(...batch);
+      if (batch.length < 100) break;
+    }
     return rows.map((row) => ({
       id: row.fixture?.id,
       home: row.teams?.home?.name ?? '',
