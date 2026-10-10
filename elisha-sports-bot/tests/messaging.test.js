@@ -135,3 +135,19 @@ test('MockMessagingAdapter: throws error when message text is missing', async ()
     /Message text is required/
   );
 });
+
+
+import { WhatsAppCloudProvider } from '../src/providers/messaging/whatsappCloudProvider.js';
+
+test('WhatsAppCloudProvider can be constructed and reports missing credentials', async () => {
+  const provider = new WhatsAppCloudProvider({
+    accessToken: 'replace-me',
+    phoneNumberId: 'replace-me',
+    apiBaseUrl: 'https://graph.facebook.com/v19.0/'
+  });
+  assert.equal(provider.getConfigStatus().configured, false);
+  await assert.rejects(
+    () => provider.sendMessage({ to: '+1234567890', text: 'Test' }),
+    /credentials are missing/
+  );
+});
