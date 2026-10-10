@@ -8,8 +8,8 @@ dotenv.config();
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(3000).refine((p) => p > 0 && p < 65536, 'PORT must be between 1 and 65535'),
-  DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
-  REDIS_URL: z.string().min(1, 'REDIS_URL is required'),
+  DATABASE_URL: z.string().min(1, 'DATABASE_URL is required').default('postgresql://postgres:change-me@localhost:5432/elisha_sports_bot'),
+  REDIS_URL: z.string().min(1, 'REDIS_URL is required').default('redis://localhost:6379'),
   WHATSAPP_WEBHOOK_VERIFY_TOKEN: z.string().default('replace-me'),
   WHATSAPP_TOKEN: z.string().default('replace-me'),
   WHATSAPP_PHONE_NUMBER_ID: z.string().default('replace-me'),
