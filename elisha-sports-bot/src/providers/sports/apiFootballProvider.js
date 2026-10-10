@@ -136,6 +136,31 @@ export class ApiFootballProvider extends SportsDataProvider {
     }));
   }
 
+  async getSeasonFixtures({ league = 'Premier League', season } = {}) {
+    const year = Number(season);
+    if (!Number.isInteger(year) || year < 2000 || year > new Date().getFullYear()) {
+      throw new Error('Season must be a year from 2000 through the current year');
+    }
+    const leagueId = await this.resolveLeagueId(league);
+    const rows = [];
+    // API-Football paginates fixture responses (commonly 100 rows per page).
+    // Cap the loop so an unusual provider response cannot run indefinitely.
+    for (let page = 1; page <= 10; page += 1) {
+      const batch = await this.request('fixtures', { league: leagueId, season: year, page, timezone: 'Africa/Kampala' });
+      rows.push(...batch);
+      if (batch.length < 100) break;
+    }
+    return rows.map((row) => ({
+      id: row.fixture?.id,
+      home: row.teams?.home?.name ?? '',
+      away: row.teams?.away?.name ?? '',
+      homeGoals: row.goals?.home,
+      awayGoals: row.goals?.away,
+      status: row.fixture?.status?.short ?? '',
+      date: row.fixture?.date,
+      source: 'api-football'
+    }));
+  }
   async getTeamSummary(teamName) {
     const form = await this.getTeamFormStats(teamName, { limit: 5 });
     if (!form.length) return null;
