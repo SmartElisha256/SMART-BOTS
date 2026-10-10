@@ -2,7 +2,7 @@ import IORedis from 'ioredis';
 import { env } from '../config/env.js';
 import { logger } from './logger.js';
 
-const redis = env.REDIS_URL ? new IORedis(env.REDIS_URL) : null;
+const redis = env.REDIS_URL ? new IORedis(env.REDIS_URL, {\n  enableOfflineQueue: false,\n  maxRetriesPerRequest: 1,\n  retryStrategy: (times) => times > 3 ? null : Math.min(times * 200, 1000)\n}) : null;
 
 const DEFAULT_TTL = 600;
 
