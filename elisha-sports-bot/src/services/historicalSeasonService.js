@@ -2,7 +2,7 @@ const FINISHED_STATUSES = new Set(['FT', 'AET', 'PEN']);
 
 function validFinishedFixture(fixture) {
   const status = String(fixture?.status ?? '').toUpperCase();
-  return FINISHED_STATUSES.has(status) && typeof fixture?.home === 'string' && fixture.home.trim() && typeof fixture?.away === 'string' && fixture.away.trim() && Number.isFinite(Number(fixture?.homeGoals)) && Number.isFinite(Number(fixture?.awayGoals));
+  return FINISHED_STATUSES.has(status) && typeof fixture?.home === 'string' && fixture.home.trim() && typeof fixture?.away === 'string' && fixture.away.trim() && fixture?.homeGoals !== null && fixture?.homeGoals !== undefined && fixture?.awayGoals !== null && fixture?.awayGoals !== undefined && Number.isFinite(Number(fixture.homeGoals)) && Number.isFinite(Number(fixture.awayGoals));
 }
 
 function emptyTeam(name) {
