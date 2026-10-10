@@ -24,8 +24,14 @@ jobs:
       DATABASE_URL: postgresql://postgres:change-me@localhost:5432/elisha_sports_bot
       REDIS_URL: redis://localhost:6379
     steps:
-      - name: Check out repository
+      - name: Check out repository without the malformed legacy path
         uses: actions/checkout@v4
+        with:
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/elisha-sports-bot/src/services/commandService.js*
+            /elisha-sports-bot/src/services/commandService.js
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
