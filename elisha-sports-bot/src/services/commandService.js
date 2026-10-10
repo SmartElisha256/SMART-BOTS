@@ -149,7 +149,7 @@ async function handleFixturesCommand(args) {
       })
       .join('\n\n');
 
-    return `📅 UPCOMING FIXTURES\n\n${list}`;
+    return `⚠️ DEMO DATA — not live or official\n\n📅 SAMPLE FIXTURES\n\n${list}`;
   } catch (error) {
     logger.error({ error }, 'Error fetching fixtures');
     return 'Could not fetch fixtures. Please try again.';
@@ -194,7 +194,7 @@ async function handleTableCommand(args) {
       )
       .join('\n');
 
-    return `📊 LEAGUE TABLE - ${league}\n\n${list}`;
+    return `⚠️ DEMO DATA — not live or official\n\n📊 SAMPLE LEAGUE TABLE - ${league}\n\n${list}`;
   } catch (error) {
     logger.error({ error }, 'Error fetching table');
     return 'Could not fetch standings. Please try again.';
