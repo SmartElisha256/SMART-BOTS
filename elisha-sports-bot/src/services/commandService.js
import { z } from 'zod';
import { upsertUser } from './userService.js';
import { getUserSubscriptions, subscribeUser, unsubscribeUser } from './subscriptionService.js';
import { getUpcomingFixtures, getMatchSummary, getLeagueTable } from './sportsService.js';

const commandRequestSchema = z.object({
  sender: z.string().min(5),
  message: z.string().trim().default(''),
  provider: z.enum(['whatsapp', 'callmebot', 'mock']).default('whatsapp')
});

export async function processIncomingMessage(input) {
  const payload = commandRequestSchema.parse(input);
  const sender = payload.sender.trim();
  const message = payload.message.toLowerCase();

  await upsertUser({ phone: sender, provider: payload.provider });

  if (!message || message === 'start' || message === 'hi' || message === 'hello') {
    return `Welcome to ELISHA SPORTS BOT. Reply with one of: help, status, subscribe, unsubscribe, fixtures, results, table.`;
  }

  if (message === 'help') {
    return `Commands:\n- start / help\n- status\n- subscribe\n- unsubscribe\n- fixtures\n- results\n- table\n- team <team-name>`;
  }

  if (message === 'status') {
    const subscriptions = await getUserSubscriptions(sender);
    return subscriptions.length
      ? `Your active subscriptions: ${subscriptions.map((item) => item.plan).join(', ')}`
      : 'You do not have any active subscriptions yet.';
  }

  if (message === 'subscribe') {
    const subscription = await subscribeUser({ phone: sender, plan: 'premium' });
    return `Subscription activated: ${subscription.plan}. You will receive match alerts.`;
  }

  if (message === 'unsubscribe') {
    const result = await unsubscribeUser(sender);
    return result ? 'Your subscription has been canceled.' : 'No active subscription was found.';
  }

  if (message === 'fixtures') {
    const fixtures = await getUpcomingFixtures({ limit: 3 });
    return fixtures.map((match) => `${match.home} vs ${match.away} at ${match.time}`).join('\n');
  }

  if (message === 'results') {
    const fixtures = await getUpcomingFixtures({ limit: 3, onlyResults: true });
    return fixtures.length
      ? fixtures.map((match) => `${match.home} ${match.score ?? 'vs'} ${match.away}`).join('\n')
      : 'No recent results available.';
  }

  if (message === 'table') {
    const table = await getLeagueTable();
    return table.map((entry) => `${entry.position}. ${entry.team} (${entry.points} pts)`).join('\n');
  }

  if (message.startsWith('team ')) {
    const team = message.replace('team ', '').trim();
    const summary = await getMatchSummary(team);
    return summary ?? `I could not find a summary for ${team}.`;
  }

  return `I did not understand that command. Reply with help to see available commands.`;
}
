@@ -1,0 +1,71 @@
+import { z } from 'zod';
+import { env } from '../config/env.js';
+import { processIncomingMessage } from '../services/commandService.js';
+import { isDuplicateMessage } from '../utils/messageDeduplication.js';
+
+const webhookPayloadSchema = z.object({
+  entry: z.array(
+    z.object({
+      changes: z.array(
+        z.object({
+          value: z.object({
+            messages: z.array(
+              z.object({
+                from: z.string(),
+                id: z.string().optional(),
+                text: z.object({ body: z.string() }).optional(),
+                type: z.enum(['text', 'image', 'interactive', 'button']).default('text')
+              })
+            ).optional().default([])
+          })
+        })
+      )
+    })
+  ).optional().default([])
+});
+
+export async function handleVerifyWebhook(req, res) {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+
+  if (mode === 'subscribe' && token === env.WHATSAPP_WEBHOOK_VERIFY_TOKEN) {
+    return res.status(200).send(String(challenge));
+  }
+
+  return res.status(403).json({ ok: false, message: 'Verification failed' });
+}
+
+export async function handleIncomingWebhook(req, res, next) {
+  try {
+    const payload = webhookPayloadSchema.parse(req.body);
+    const messageBatch = payload.entry.flatMap((entry) => entry.changes.flatMap((change) => change.value.messages ?? []));
+
+    if (!messageBatch.length) {
+      return res.status(200).json({ ok: true, message: 'No messages received' });
+    }
+
+    const results = [];
+
+    for (const message of messageBatch) {
+      const identifier = message.id ?? `${message.from}:${message.text?.body ?? 'unknown'}`;
+      if (isDuplicateMessage(identifier)) {
+        results.push({ ok: true, duplicate: true, sender: message.from, message: 'Duplicate ignored' });
+        continue;
+      }
+
+      const text = message.text?.body?.trim() ?? '';
+      const response = await processIncomingMessage({
+        sender: message.from,
+        message: text,
+        provider: 'whatsapp'
+      });
+
+      results.push({ ok: true, sender: message.from, response });
+    }
+
+    return res.status(200).json({ ok: true, results });
+  } catch (error) {
+    next(error);
+  }
+}

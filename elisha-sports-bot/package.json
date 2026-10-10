@@ -1,0 +1,38 @@
+{
+  "name": "elisha-sports-bot",
+  "version": "1.0.0",
+  "description": "WhatsApp football information bot for ELISHA SPORTS BOT",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "prod": "NODE_ENV=production node src/server.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "whatsapp",
+    "sports",
+    "bot",
+    "express",
+    "postgres",
+    "redis",
+    "bullmq"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "bullmq": "^5.10.0",
+    "dotenv": "^16.4.1",
+    "express": "^4.19.2",
+    "ioredis": "^5.6.1",
+    "pg": "^8.12.0",
+    "pino": "^9.0.0",
+    "rate-limiter-flexible": "^5.0.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "supertest": "^7.0.0"
+  }
+}
