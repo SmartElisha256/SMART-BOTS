@@ -1,21 +1,24 @@
-version: '3.8'
-
 services:
   app:
     build: .
     container_name: elisha-sports-bot
+    init: true
+    restart: unless-stopped
     ports:
       - "3000:3000"
     env_file:
       - .env
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     command: npm run start
 
   postgres:
     image: postgres:16-alpine
     container_name: elisha-sports-bot-db
+    restart: unless-stopped
     environment:
       POSTGRES_DB: elisha_sports_bot
       POSTGRES_USER: postgres
@@ -24,12 +27,24 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./src/database/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d elisha_sports_bot"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
 
   redis:
     image: redis:7-alpine
     container_name: elisha-sports-bot-redis
+    restart: unless-stopped
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
 
 volumes:
   pgdata:
