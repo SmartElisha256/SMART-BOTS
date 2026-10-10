@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { mockSportsProvider } from '../providers/sports/mockSportsProvider.js';
+import { getSportsDataProvider } from '../providers/sports/providerFactory.js';
 import { getCached, setCached, generateCacheKey } from '../utils/cache.js';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
@@ -13,7 +13,7 @@ const sportsOptionsSchema = z.object({
 
 export async function getUpcomingFixtures(options = {}) {
   const payload = sportsOptionsSchema.parse(options);
-  const cacheKey = generateCacheKey('fixtures', payload.league, String(payload.limit), String(payload.liveOnly));
+  const cacheKey = generateCacheKey('fixtures', payload.league, String(payload.limit), String(payload.liveOnly), String(payload.onlyResults));
 
   const cached = await getCached(cacheKey);
   if (cached) {
@@ -21,7 +21,7 @@ export async function getUpcomingFixtures(options = {}) {
     return cached;
   }
 
-  const provider = mockSportsProvider;
+  const provider = getSportsDataProvider();
   const fixtures = await provider.getFixtures({ limit: payload.limit, onlyResults: payload.onlyResults, liveOnly: payload.liveOnly });
 
   await setCached(cacheKey, fixtures, env.CACHE_TTL_FIXTURES);
@@ -62,10 +62,11 @@ export async function getLeagueTable(options = {}) {
   }
 
   const provider = mockSportsProvider;
-  const table = await provider.getLeagueTable();
+  const table = await provider.getLeagueTable({ league: payload.league });
 
-  await setCached(cacheKey, table, env.CACHE_TTL_TABLE);
-  return table;
+  const limitedTable = table.slice(0, payload.limit);
+  await setCached(cacheKey, limitedTable, env.CACHE_TTL_TABLE);
+  return limitedTable;
 }
 
 export async function getTeamFormStats(teamName, options = {}) {
@@ -110,7 +111,7 @@ export async function getSportsSummary() {
   return {
     fixtures: await getUpcomingFixtures({ limit: 3 }),
     table: await getLeagueTable({ limit: 5 }),
-    source: 'mock',
-    note: 'Mock data only. No real sports-data provider is configured.'
+    source: env.SPORTS_DATA_PROVIDER,
+    note: env.SPORTS_DATA_PROVIDER === 'mock' ? 'Mock data only. No real sports-data provider is configured.' : 'Data supplied by the configured football provider.'
   };
 }
