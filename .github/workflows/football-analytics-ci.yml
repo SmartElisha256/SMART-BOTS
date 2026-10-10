@@ -18,7 +18,14 @@ jobs:
       run:
         working-directory: elisha-sports-bot/football-analytics
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out the repository, excluding the malformed legacy path
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/elisha-sports-bot/src/services/commandService.js*
+            /elisha-sports-bot/src/services/commandService.js
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
