@@ -2,6 +2,18 @@ import { env } from '../../config/env.js';
 import { SportsDataProvider } from './sportsDataProvider.js';
 
 const API_BASE = (env.SPORTS_API_BASE_URL || 'https://v3.football.api-sports.io').replace(/\/$/, '');
+const FINISHED_STATUSES = new Set(['FT', 'AET', 'PEN']);
+
+function kampalaDate(date) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Kampala',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
 
 export class ApiFootballProvider extends SportsDataProvider {
   constructor({ fetchImpl = fetch } = {}) {
@@ -44,16 +56,32 @@ export class ApiFootballProvider extends SportsDataProvider {
     } else if (onlyResults) {
       params.last = Math.min(Math.max(limit, 1), 10);
     } else {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = kampalaDate(new Date());
+      const endDate = kampalaDate(new Date(Date.now() + 14 * 86400000));
       params.from = today;
-      params.to = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
+      params.to = endDate;
       params.league = await this.resolveLeagueId(league);
       params.season = env.SPORTS_API_SEASON;
     }
-    if (league && /^\d+$/.test(String(league))) params.league = league;
+
+    // Apply named as well as numeric league filters consistently for live scores/results.
+    if (league && !/^\d+$/.test(String(league))) {
+      params.league = await this.resolveLeagueId(league);
+    } else if (league) {
+      params.league = String(league);
+    }
+
     const rows = await this.request('fixtures', params);
-    const upcomingRows = liveOnly || onlyResults ? rows : rows.filter((row) => new Date(row.fixture?.date).getTime() >= Date.now() && ['NS', 'TBD', 'PST'].includes(row.fixture?.status?.short));
-    return upcomingRows.slice(0, limit).map((row) => ({
+    const selectedRows = liveOnly
+      ? rows
+      : onlyResults
+        ? rows.filter((row) => FINISHED_STATUSES.has(row.fixture?.status?.short))
+        : rows.filter((row) =>
+            new Date(row.fixture?.date).getTime() >= Date.now() &&
+            ['NS', 'TBD', 'PST'].includes(row.fixture?.status?.short)
+          );
+
+    return selectedRows.slice(0, limit).map((row) => ({
       id: row.fixture?.id,
       home: row.teams?.home?.name ?? 'Home team',
       away: row.teams?.away?.name ?? 'Away team',
@@ -79,7 +107,7 @@ export class ApiFootballProvider extends SportsDataProvider {
     const team = await this.findTeam(teamName);
     if (!team) return [];
     const rows = await this.request('fixtures', { team: team.id, last: Math.min(Math.max(limit, 1), 10), timezone: 'Africa/Kampala' });
-    const finished = rows.filter((row) => ['FT', 'AET', 'PEN'].includes(row.fixture?.status?.short));
+    const finished = rows.filter((row) => FINISHED_STATUSES.has(row.fixture?.status?.short));
     const results = finished.map((row) => {
       const isHome = row.teams?.home?.id === team.id;
       const scored = isHome ? row.goals?.home : row.goals?.away;
@@ -96,7 +124,7 @@ export class ApiFootballProvider extends SportsDataProvider {
     const [a, b] = await Promise.all([this.findTeam(teamA), this.findTeam(teamB)]);
     if (!a || !b) return null;
     const rows = await this.request('fixtures/headtohead', { h2h: `${a.id}-${b.id}`, last: 10, timezone: 'Africa/Kampala' });
-    const finished = rows.filter((row) => ['FT', 'AET', 'PEN'].includes(row.fixture?.status?.short));
+    const finished = rows.filter((row) => FINISHED_STATUSES.has(row.fixture?.status?.short));
     let wins_a = 0, wins_b = 0, draws = 0;
     for (const row of finished) {
       const homeId = row.teams?.home?.id;
@@ -161,6 +189,7 @@ export class ApiFootballProvider extends SportsDataProvider {
       source: 'api-football'
     }));
   }
+
   async getTeamSummary(teamName) {
     const form = await this.getTeamFormStats(teamName, { limit: 5 });
     if (!form.length) return null;
