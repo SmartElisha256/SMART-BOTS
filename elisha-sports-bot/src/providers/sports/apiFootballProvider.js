@@ -27,6 +27,16 @@ export class ApiFootballProvider extends SportsDataProvider {
     return Array.isArray(body.response) ? body.response : [];
   }
 
+  async resolveLeagueId(leagueName) {
+    const value = String(leagueName ?? '').trim();
+    if (/^\d+$/.test(value)) return value;
+    if (!value || value.toLowerCase() === 'premier league') return env.SPORTS_API_LEAGUE_ID;
+    const rows = await this.request('leagues', { search: value, season: env.SPORTS_API_SEASON });
+    const normalized = value.toLowerCase();
+    const exact = rows.find((row) => row.league?.name?.toLowerCase() === normalized);
+    return String((exact ?? rows[0])?.league?.id ?? env.SPORTS_API_LEAGUE_ID);
+  }
+
   async getFixtures({ limit = 3, onlyResults = false, liveOnly = false, league } = {}) {
     const params = { timezone: 'Africa/Kampala' };
     if (liveOnly) {
@@ -37,12 +47,13 @@ export class ApiFootballProvider extends SportsDataProvider {
       const today = new Date().toISOString().slice(0, 10);
       params.from = today;
       params.to = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
-      params.league = env.SPORTS_API_LEAGUE_ID;
+      params.league = await this.resolveLeagueId(league);
       params.season = env.SPORTS_API_SEASON;
     }
     if (league && /^\d+$/.test(String(league))) params.league = league;
     const rows = await this.request('fixtures', params);
-    return rows.slice(0, limit).map((row) => ({
+    const upcomingRows = liveOnly || onlyResults ? rows : rows.filter((row) => new Date(row.fixture?.date).getTime() >= Date.now() && ['NS', 'TBD', 'PST'].includes(row.fixture?.status?.short));
+    return upcomingRows.slice(0, limit).map((row) => ({
       id: row.fixture?.id,
       home: row.teams?.home?.name ?? 'Home team',
       away: row.teams?.away?.name ?? 'Away team',
@@ -108,7 +119,7 @@ export class ApiFootballProvider extends SportsDataProvider {
   }
 
   async getLeagueTable({ league } = {}) {
-    const leagueId = /^\d+$/.test(String(league ?? '')) ? String(league) : env.SPORTS_API_LEAGUE_ID;
+    const leagueId = await this.resolveLeagueId(league);
     const rows = await this.request('standings', { league: leagueId, season: env.SPORTS_API_SEASON });
     const standings = rows[0]?.league?.standings?.[0] ?? [];
     return standings.map((row) => ({
