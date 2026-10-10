@@ -102,6 +102,7 @@ Available commands:
 • TABLE — league standings
 • FORM [TEAM] — recent results for a team
 • H2H [TEAM A] vs [TEAM B] — head-to-head stats
+• ANALYZE [TEAM A] vs [TEAM B] — AI match analysis
 • HELP — usage guide
 • START — enable notifications
 • STOP — disable notifications`;
@@ -123,6 +124,9 @@ FORM Arsenal
 
 H2H Manchester City vs Liverpool
   Shows historical head-to-head record.
+
+ANALYZE Arsenal vs Chelsea
+  Compares recent form and head-to-head data; AI analysis is optional.
 
 LIVE
   Shows current live scores (when available).
