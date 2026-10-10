@@ -49,8 +49,8 @@ export class MockSportsProvider extends SportsDataProvider {
       liverpool: 'Liverpool are creating chances through fast wing play and aggressive midfield control.',
       chelsea: 'Chelsea are finding rhythm through patient build-up and vertical passing.',
       barcelona: 'Barcelona are dominating possession and attacking through the half-spaces.',
-      real madrid: 'Real Madrid remain dangerous on counters with elite finishing in the final third.',
-      manchester city: 'Manchester City are controlled and dynamic, especially with ball progression through midfield.'
+      'real madrid': 'Real Madrid remain dangerous on counters with elite finishing in the final third.',
+      'manchester city': 'Manchester City are controlled and dynamic, especially with ball progression through midfield.'
     };
 
     const match = Object.entries(summaryByTeam).find(([team]) => team === normalized);
