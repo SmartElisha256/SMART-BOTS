@@ -13,7 +13,7 @@ export class CallMeBotAdapter {
     const finalConfig = callmebotConfigSchema.parse({
       apiKey: config.apiKey || env.CALLMEBOT_API_KEY,
       phone: config.phone || env.CALLMEBOT_PHONE,
-      endpoint: config.endpoint || 'https://api.callmebot.com/whatsapp.php'
+      endpoint: config.endpoint || env.CALLMEBOT_ENDPOINT
     });
 
     this.apiKey = finalConfig.apiKey;
