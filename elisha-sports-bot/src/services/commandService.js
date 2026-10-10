@@ -277,7 +277,7 @@ async function handleH2HCommand(args) {
 }
 
 async function handleSeasonCommand(args) {
-  const match = String(args ?? '').trim().match(/^(.*?)(?:\\s+)?(20\\d{2})$/);
+  const match = String(args ?? '').trim().match(/^(.*?)(?:\s+)?(20\d{2})$/);
   if (!match) return 'Usage: SEASON Premier League 2023';
   const league = match[1].trim() || 'Premier League';
   const season = Number(match[2]);
