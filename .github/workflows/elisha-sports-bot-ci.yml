@@ -37,7 +37,7 @@ jobs:
         run: |
           echo "HEAD=$(git rev-parse HEAD)"
           echo "TREE=$(git rev-parse HEAD^{tree})"
-          git ls-tree -z HEAD:elisha-sports-bot/src/services | python3 -c "import sys; data=sys.stdin.buffer.read(); [print(meta.decode(), repr(name[:180])) for rec in data.split(bytes([0])) if rec for meta,name in [rec.split(bytes([9]),1)] if b'commandService.js' in name]"
+          git ls-tree -z HEAD:elisha-sports-bot/src/services | python3 -c "import sys; data=sys.stdin.buffer.read(); [print(meta.decode(), repr(name[:250])) for rec in data.split(bytes([0])) if rec for meta,name in [rec.split(bytes([9]),1)]]"
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
