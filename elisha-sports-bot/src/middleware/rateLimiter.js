@@ -3,7 +3,7 @@ import { RateLimiterRedis } from 'rate-limiter-flexible';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 
-const redisClient = env.REDIS_URL ? new IORedis(env.REDIS_URL, {
+const redisClient = env.NODE_ENV === 'test' ? null : env.REDIS_URL ? new IORedis(env.REDIS_URL, {
   maxRetriesPerRequest: 1,
   retryStrategy: (times) => times > 3 ? null : Math.min(times * 200, 1000)
 }) : null;
