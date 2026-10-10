@@ -1,18 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { processIncomingMessage } from '../src/services/commandService.js';
+import { parseCommand } from '../src/services/commandService.js';
 
-test('returns help text for help command', async () => {
-  const response = await processIncomingMessage({ sender: '+123456789', message: 'help', provider: 'whatsapp' });
-  assert.match(response, /Commands:/i);
+test('parseCommand handles a command without arguments', () => {
+  assert.deepEqual(parseCommand('MENU'), { command: 'menu', args: null, raw: 'menu' });
 });
 
-test('activates premium subscription for subscribe command', async () => {
-  const response = await processIncomingMessage({ sender: '+123456789', message: 'subscribe', provider: 'whatsapp' });
-  assert.match(response, /Subscription activated/i);
+test('parseCommand separates command and multiword arguments', () => {
+  assert.deepEqual(parseCommand('FORM Arsenal Women'), {
+    command: 'form', args: 'arsenal women', raw: 'form arsenal women'
+  });
 });
 
-test('responds to start command with welcome message', async () => {
-  const response = await processIncomingMessage({ sender: '+987654321', message: 'start', provider: 'mock' });
-  assert.match(response, /Welcome to ELISHA SPORTS BOT/i);
+test('parseCommand handles whitespace and H2H arguments', () => {
+  assert.deepEqual(parseCommand('  '), { command: null, args: null, raw: '' });
+  assert.deepEqual(parseCommand('H2H Manchester City vs Liverpool'), {
+    command: 'h2h', args: 'manchester city vs liverpool', raw: 'h2h manchester city vs liverpool'
+  });
 });

@@ -17,9 +17,25 @@ const table = [
 ];
 
 export class MockSportsProvider extends SportsDataProvider {
-  async getFixtures({ limit = 3, onlyResults = false } = {}) {
-    const selected = fixtures.filter((match) => onlyResults ? match.score : true).slice(0, limit);
+  async getFixtures({ limit = 3, onlyResults = false, liveOnly = false } = {}) {
+    // This provider is demonstration data, never a source of real live scores.
+    if (liveOnly) return [];
+    const now = Date.now();
+    const selected = fixtures.filter((match) => {
+      const isFuture = new Date(match.time).getTime() > now;
+      return onlyResults ? Boolean(match.score) : isFuture && !match.score;
+    }).slice(0, limit);
     return selected;
+  }
+
+  async getTeamFormStats() {
+    // No invented form records: use a real provider before exposing form stats.
+    return [];
+  }
+
+  async getHeadToHeadRecord() {
+    // No invented H2H records: use a real provider before exposing H2H stats.
+    return null;
   }
 
   async getLeagueTable() {
@@ -33,8 +49,8 @@ export class MockSportsProvider extends SportsDataProvider {
       liverpool: 'Liverpool are creating chances through fast wing play and aggressive midfield control.',
       chelsea: 'Chelsea are finding rhythm through patient build-up and vertical passing.',
       barcelona: 'Barcelona are dominating possession and attacking through the half-spaces.',
-      real madrid: 'Real Madrid remain dangerous on counters with elite finishing in the final third.',
-      manchester city: 'Manchester City are controlled and dynamic, especially with ball progression through midfield.'
+      'real madrid': 'Real Madrid remain dangerous on counters with elite finishing in the final third.',
+      'manchester city': 'Manchester City are controlled and dynamic, especially with ball progression through midfield.'
     };
 
     const match = Object.entries(summaryByTeam).find(([team]) => team === normalized);

@@ -8,33 +8,33 @@ dotenv.config();
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(3000).refine((p) => p > 0 && p < 65536, 'PORT must be between 1 and 65535'),
-  DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
-  REDIS_URL: z.string().min(1, 'REDIS_URL is required'),
+  DATABASE_URL: z.string().min(1, 'DATABASE_URL is required').default('postgresql://postgres:change-me@localhost:5432/elisha_sports_bot'),
+  REDIS_URL: z.string().min(1, 'REDIS_URL is required').default('redis://localhost:6379'),
   WHATSAPP_WEBHOOK_VERIFY_TOKEN: z.string().default('replace-me'),
   WHATSAPP_TOKEN: z.string().default('replace-me'),
   WHATSAPP_PHONE_NUMBER_ID: z.string().default('replace-me'),
-  WHATSAPP_API_BASE_URL: z.string().default('https://graph.facebook.com/v19.0'),
+  WHATSAPP_API_BASE_URL: z.string().url().default('https://graph.facebook.com/v19.0'),
   WHATSAPP_APP_SECRET: z.string().optional().default(''),
   WHATSAPP_API_VERSION: z.string().default('v19.0'),
   CALLMEBOT_API_KEY: z.string().default('replace-me'),
   CALLMEBOT_PHONE: z.string().default('replace-me'),
-  CALLMEBOT_ENDPOINT: z.string().default('https://api.callmebot.com/whatsapp.php'),
-  MESSAGING_PROVIDER: z.enum(['mock', 'callmebot']).default('mock'),
+  CALLMEBOT_ENDPOINT: z.string().url().default('https://api.callmebot.com/whatsapp.php'),
+  MESSAGING_PROVIDER: z.enum(['mock', 'callmebot', 'whatsapp-cloud']).default('mock'),
   SPORTS_API_BASE_URL: z.string().optional().default(''),
   SPORTS_API_KEY: z.string().optional().default(''),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
-  CACHE_TTL_FIXTURES: z.coerce.number().default(600),
-  CACHE_TTL_TABLE: z.coerce.number().default(900),
-  CACHE_TTL_FORM: z.coerce.number().default(1800),
-  JOB_MAX_ATTEMPTS: z.coerce.number().default(3),
-  JOB_CONCURRENCY: z.coerce.number().default(5),
-  RATE_LIMIT_POINTS: z.coerce.number().default(30),
-  RATE_LIMIT_DURATION: z.coerce.number().default(60)
+  CACHE_TTL_FIXTURES: z.coerce.number().int().positive().default(600),
+  CACHE_TTL_TABLE: z.coerce.number().int().positive().default(900),
+  CACHE_TTL_FORM: z.coerce.number().int().positive().default(1800),
+  JOB_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
+  JOB_CONCURRENCY: z.coerce.number().int().positive().default(5),
+  RATE_LIMIT_POINTS: z.coerce.number().int().positive().default(30),
+  RATE_LIMIT_DURATION: z.coerce.number().int().positive().default(60)
 });
 
 export const env = envSchema.parse(process.env);
 
-export const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+export const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 export function validateEnvironment() {
   const requiredVars = ['DATABASE_URL', 'REDIS_URL'];
@@ -51,6 +51,7 @@ export function validateEnvironment() {
     port: env.PORT,
     databaseConfigured: Boolean(env.DATABASE_URL),
     redisConfigured: Boolean(env.REDIS_URL),
+    messagingProvider: env.MESSAGING_PROVIDER,
     cacheTTLs: {
       fixtures: env.CACHE_TTL_FIXTURES,
       table: env.CACHE_TTL_TABLE,

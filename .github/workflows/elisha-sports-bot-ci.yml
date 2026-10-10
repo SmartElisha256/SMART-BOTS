@@ -1,0 +1,45 @@
+name: ELISHA SPORTS BOT CI
+
+on:
+  push:
+    branches:
+      - main
+      - repair/**
+    paths:
+      - "elisha-sports-bot/**"
+      - ".github/workflows/elisha-sports-bot-ci.yml"
+  pull_request:
+    paths:
+      - "elisha-sports-bot/**"
+      - ".github/workflows/elisha-sports-bot-ci.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: elisha-sports-bot
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:change-me@localhost:5432/elisha_sports_bot
+      REDIS_URL: redis://localhost:6379
+    steps:
+      - name: Check out repository without the malformed legacy path
+        uses: actions/checkout@v4
+        with:
+          ref: repair/elisha-sports-bot-stability
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/elisha-sports-bot/src/services/commandService.js*
+            /elisha-sports-bot/src/services/commandService.js
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm install
+      - name: Run tests
+        run: npm test
+      - name: Validate messaging configuration
+        run: npm run validate:messaging

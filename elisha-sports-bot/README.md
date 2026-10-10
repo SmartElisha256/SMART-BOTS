@@ -1,106 +1,70 @@
 # ELISHA SPORTS BOT
 
-A modular Node.js WhatsApp football bot built for automated match updates, subscription management, and sports information delivery.
+Node.js/Express starter for a WhatsApp football-information bot.
 
-## Features
+## Current status
 
-- Express HTTP server with health checks and webhook endpoint
-- PostgreSQL storage for users and subscriptions
-- Redis + BullMQ queue for background jobs and rate limiting
-- Messaging abstraction for CallMeBot, WhatsApp Cloud API, and a mock provider
-- Mock sports data provider for local development without external API keys
-- Structured logging, validation with Zod, error handling, and graceful shutdown
-- Automated tests for bot commands and sports fixtures
+- WhatsApp webhook verification and inbound text-message handling are implemented.
+- Outbound messaging adapters: mock, CallMeBot, and WhatsApp Cloud API.
+- PostgreSQL user/preferences/subscription storage and Redis caching/rate limiting are wired in.
+- Sports data is still mock/demo data. A real football API provider has not been implemented. Sample fixtures and standings are labeled as demo data; real live scores, form, and head-to-head data are not available yet.
+- Real WhatsApp use requires valid Meta credentials and a publicly reachable HTTPS webhook.
 
-## Project structure
+## Requirements
 
-```text
-elisha-sports-bot/
-├── src/
-│   ├── app.js
-│   ├── server.js
-│   ├── config/
-│   │   └── env.js
-│   ├── routes/
-│   │   ├── health.js
-│   │   └── webhook.js
-│   ├── controllers/
-│   │   └── webhookController.js
-│   ├── services/
-│   │   ├── commandService.js
-│   │   ├── sportsService.js
-│   │   ├── subscriptionService.js
-│   │   └── userService.js
-│   ├── providers/
-│   │   ├── messaging/
-│   │   │   ├── messagingProvider.js
-│   │   │   ├── callmebotProvider.js
-│   │   │   ├── mockMessagingProvider.js
-│   │   │   └── whatsappCloudProvider.js
-│   │   └── sports/
-│   │       ├── mockSportsProvider.js
-│   │       ├── sportsDataProvider.js
-│   │       └── sportsDataProvider.js
-│   ├── jobs/
-│   │   ├── queue.js
-│   │   └── worker.js
-│   ├── middleware/
-│   │   ├── errorHandler.js
-│   │   └── rateLimiter.js
-│   ├── database/
-│   │   ├── pool.js
-│   │   └── schema.sql
-│   ├── utils/
-│   │   ├── logger.js
-│   │   └── messageDeduplication.js
-│   └── tests/
-│       ├── commands.test.js
-│       └── sports.test.js
-├── .env.example
-├── .gitignore
-├── Dockerfile
-├── docker-compose.yml
-├── package.json
-├── README.md
-└── src/
-```
+- Node.js 20 or newer recommended
+- Docker Compose (recommended for PostgreSQL and Redis)
+- Meta WhatsApp Cloud API credentials for production WhatsApp messaging
 
-## Quick start
+## Start with Docker
 
-```bash
-npm install
-cp .env.example .env
-npm run dev
-```
+From this folder (elisha-sports-bot), copy the example environment file:
 
-## Environment notes
+    cp .env.example .env
 
-- PostgreSQL and Redis are required for full production behavior. Docker Compose includes both.
-- The app can run in a mocked state without paid sports APIs by using the built-in mock sports provider.
-- CallMeBot is not a general public inbound WhatsApp platform; it is limited to explicit outbound messaging setup and does not support arbitrary public inbound messaging to all users. This project does not assume unsupported behavior.
-- WhatsApp Cloud API credentials and webhook verification tokens require external setup from Meta.
+Edit .env and set a long random WHATSAPP_WEBHOOK_VERIFY_TOKEN. For real WhatsApp messaging, also set MESSAGING_PROVIDER=whatsapp-cloud, WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, and WHATSAPP_APP_SECRET using values from your Meta app.
 
-## Deployment
+Start the services:
 
-```bash
-npm run prod
-```
+    docker compose up --build
 
-## Testing
+Docker Compose starts PostgreSQL and Redis, initializes the schema on a new database volume, and waits for both services to be healthy before starting the app. If you already have a populated pgdata volume, Docker will not rerun the initialization script; apply src/database/schema.sql to that database manually.
 
-```bash
-npm test
-```
+Check the service:
 
-## External setup required
+    curl http://localhost:3000/
+    curl http://localhost:3000/health
+    curl http://localhost:3000/health/ready
 
-- PostgreSQL database and Redis service
-- WhatsApp Business / Cloud API credentials for production messaging
-- Optional sports API keys if swapping the mock provider for a real live provider
-- CallMeBot credentials only if using that provider
+## Run Node directly
 
-## TODO
+If running Node on your computer instead of inside Docker, copy .env.example to .env and change the database and Redis hostnames from postgres and redis to localhost. Start PostgreSQL and Redis first, then run:
 
-- Replace `.env` credentials with real values for production use.
-- Add actual database migrations if your team prefers migration-based schema management.
-- Replace the mock sports provider with a real provider when live data is required.
+    npm install
+    npm run dev
+
+## Supported text commands
+
+- MENU or HELP
+- FIXTURES
+- LIVE
+- TABLE [LEAGUE]
+- FORM TEAM
+- H2H TEAM A vs TEAM B
+- START and STOP for notification preferences
+
+Commands that depend on real football data will not produce real results until a real sports-data provider is implemented and configured. The current sample table and sample fixtures are explicitly labeled as demo data.
+
+## WhatsApp webhook configuration
+
+Set the Meta callback URL to https://YOUR_PUBLIC_HOST/webhook and use the same verify token in the Meta settings and .env. The endpoint supports Meta's GET verification challenge and POST message notifications. Production POST requests require a valid X-Hub-Signature-256 signature, so WHATSAPP_APP_SECRET must be set correctly.
+
+Do not expose tokens, app secrets, or your .env file in GitHub. Only .env.example should be committed.
+
+## Tests
+
+    npm install
+    npm test
+    npm run validate:messaging
+
+A GitHub Actions workflow is included to run tests and validate mock messaging configuration on changes to this project.
