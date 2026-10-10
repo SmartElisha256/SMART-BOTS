@@ -7,7 +7,8 @@ Node.js/Express starter for a WhatsApp football-information bot.
 - WhatsApp webhook verification and inbound text-message handling are implemented.
 - Outbound messaging adapters: mock, CallMeBot, and WhatsApp Cloud API.
 - PostgreSQL user/preferences/subscription storage and Redis caching/rate limiting are wired in.
-- Sports data is still mock/demo data. A real football API provider has not been implemented. Sample fixtures and standings are labeled as demo data; real live scores, form, and head-to-head data are not available yet.
+- Sports data supports a mock provider and an API-Football provider. Mock remains the safe default; real results require `SPORTS_DATA_PROVIDER=api-football` and a valid `SPORTS_API_KEY`.
+- `ANALYZE Team A vs Team B` compares recent form and head-to-head data. Set `OPENAI_API_KEY` to enable AI-written analysis; without it, the bot returns a statistics summary. AI output is evidence-based but not a guaranteed prediction.
 - Real WhatsApp use requires valid Meta credentials and a publicly reachable HTTPS webhook.
 
 ## Requirements
@@ -53,7 +54,14 @@ If running Node on your computer instead of inside Docker, copy .env.example to 
 - H2H TEAM A vs TEAM B
 - START and STOP for notification preferences
 
-Commands that depend on real football data will not produce real results until a real sports-data provider is implemented and configured. The current sample table and sample fixtures are explicitly labeled as demo data.
+### Configure real football data and AI analysis
+
+1. Create an API-Football account and obtain an API key from its official dashboard.
+2. Set `SPORTS_DATA_PROVIDER=api-football`, `SPORTS_API_KEY`, `SPORTS_API_LEAGUE_ID` (default `39`, English Premier League), and `SPORTS_API_SEASON` in `.env`. API availability, leagues, and rate limits depend on your provider plan.
+3. Optionally set `OPENAI_API_KEY` and `OPENAI_MODEL` to enable AI-written analysis. API usage may incur separate charges.
+4. Restart the service and test `FIXTURES`, `LIVE`, `TABLE`, `FORM Arsenal`, `H2H Arsenal vs Liverpool`, and `ANALYZE Arsenal vs Liverpool`.
+
+When `SPORTS_DATA_PROVIDER=mock`, fixture/table replies remain labeled as demo data. Do not use mock output for real-world decisions. The analysis does not guarantee match outcomes; missing data should be treated as unknown.
 
 ## WhatsApp webhook configuration
 
