@@ -39,7 +39,10 @@ const envSchema = z.object({
   FREE_DAILY_REQUEST_LIMIT: z.coerce.number().int().positive().default(20),
   PREMIUM_DAILY_REQUEST_LIMIT: z.coerce.number().int().positive().default(200),
   // Manual payments only; no payment gateway or automatic debit is used.
-  PREMIUM_PRICE_UGX: z.coerce.number().int().nonnegative().default(0),
+  PREMIUM_PRICE_UGX: z.coerce.number().int().nonnegative().default(5000),
+  PREMIUM_PRICE_DAY_UGX: z.coerce.number().int().positive().default(1000),
+  PREMIUM_PRICE_WEEK_UGX: z.coerce.number().int().positive().default(5000),
+  PREMIUM_PRICE_MONTH_UGX: z.coerce.number().int().positive().default(15000),
   MOMO_NETWORK: z.string().default(''),
   MOMO_MERCHANT_CODE: z.string().default('SET_YOUR_MERCHANT_CODE'),
   MOMO_MERCHANT_NAME: z.string().default(''),
@@ -74,7 +77,9 @@ export function validateEnvironment() {
       premium: env.PREMIUM_DAILY_REQUEST_LIMIT
     },
     manualPaymentsConfigured: Boolean(
-      env.PREMIUM_PRICE_UGX > 0 &&
+      env.PREMIUM_PRICE_DAY_UGX > 0 &&
+      env.PREMIUM_PRICE_WEEK_UGX > 0 &&
+      env.PREMIUM_PRICE_MONTH_UGX > 0 &&
       env.MOMO_NETWORK &&
       env.MOMO_MERCHANT_CODE !== 'SET_YOUR_MERCHANT_CODE' &&
       env.MOMO_MERCHANT_NAME &&
