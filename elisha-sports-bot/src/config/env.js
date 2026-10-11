@@ -37,7 +37,8 @@ const envSchema = z.object({
   RATE_LIMIT_POINTS: z.coerce.number().int().positive().default(30),
   RATE_LIMIT_DURATION: z.coerce.number().int().positive().default(60),
   FREE_DAILY_REQUEST_LIMIT: z.coerce.number().int().positive().default(20),
-  PREMIUM_DAILY_REQUEST_LIMIT: z.coerce.number().int().positive().default(200),
+  PREMIUM_DAILY_REQUEST_LIMIT: z.coerce.number().int().positive().default(10),
+  PREMIUM_MONTHLY_REQUEST_LIMIT: z.coerce.number().int().positive().default(300),
   // Manual payments only; no payment gateway or automatic debit is used.
   PREMIUM_PRICE_UGX: z.coerce.number().int().nonnegative().default(5000),
   PREMIUM_PRICE_DAY_UGX: z.coerce.number().int().positive().default(1000),
@@ -74,7 +75,8 @@ export function validateEnvironment() {
     aiAnalysisConfigured: Boolean(env.OPENAI_API_KEY),
     dailyRequestLimits: {
       free: env.FREE_DAILY_REQUEST_LIMIT,
-      premium: env.PREMIUM_DAILY_REQUEST_LIMIT
+      premium: env.PREMIUM_DAILY_REQUEST_LIMIT,
+      premiumMonthly: env.PREMIUM_MONTHLY_REQUEST_LIMIT
     },
     manualPaymentsConfigured: Boolean(
       env.PREMIUM_PRICE_DAY_UGX > 0 &&
