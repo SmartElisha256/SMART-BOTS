@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+process.env.NODE_ENV = 'test';
+
 process.env.PREMIUM_PRICE_DAY_UGX = '1000';
 process.env.PREMIUM_PRICE_WEEK_UGX = '5000';
 process.env.PREMIUM_PRICE_MONTH_UGX = '15000';
