@@ -37,7 +37,13 @@ const envSchema = z.object({
   RATE_LIMIT_POINTS: z.coerce.number().int().positive().default(30),
   RATE_LIMIT_DURATION: z.coerce.number().int().positive().default(60),
   FREE_DAILY_REQUEST_LIMIT: z.coerce.number().int().positive().default(20),
-  PREMIUM_DAILY_REQUEST_LIMIT: z.coerce.number().int().positive().default(200)
+  PREMIUM_DAILY_REQUEST_LIMIT: z.coerce.number().int().positive().default(200),
+  // Manual payments only; no payment gateway or automatic debit is used.
+  PREMIUM_PRICE_UGX: z.coerce.number().int().nonnegative().default(0),
+  MOMO_NETWORK: z.string().default(''),
+  MOMO_MERCHANT_CODE: z.string().default('SET_YOUR_MERCHANT_CODE'),
+  MOMO_MERCHANT_NAME: z.string().default(''),
+  PAYMENT_ADMIN_PHONES: z.string().default('')
 });
 
 export const env = envSchema.parse(process.env);
@@ -67,6 +73,13 @@ export function validateEnvironment() {
       free: env.FREE_DAILY_REQUEST_LIMIT,
       premium: env.PREMIUM_DAILY_REQUEST_LIMIT
     },
+    manualPaymentsConfigured: Boolean(
+      env.PREMIUM_PRICE_UGX > 0 &&
+      env.MOMO_NETWORK &&
+      env.MOMO_MERCHANT_CODE !== 'SET_YOUR_MERCHANT_CODE' &&
+      env.MOMO_MERCHANT_NAME &&
+      env.PAYMENT_ADMIN_PHONES
+    ),
     cacheTTLs: {
       fixtures: env.CACHE_TTL_FIXTURES,
       table: env.CACHE_TTL_TABLE,
