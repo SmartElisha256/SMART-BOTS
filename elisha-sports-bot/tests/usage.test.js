@@ -8,7 +8,8 @@ import {
   getKampalaDate,
   getNextKampalaMidnight,
   formatQuotaLimitMessage,
-  claimQuotaNotice
+  claimQuotaNotice,
+  claimCommandCooldown
 } from '../src/services/usageService.js';
 
 test('tracks football-data commands but not help or preference commands', () => {
@@ -69,4 +70,13 @@ test('quota notices are claimed only once per user and quota period', async () =
   assert.equal(await claimQuotaNotice(phone, 'day'), false);
   assert.equal(await claimQuotaNotice(phone, 'month'), true);
   assert.equal(await claimQuotaNotice(phone, 'month'), false);
+});
+
+test('utility commands have independent 30-second per-user cooldowns', async () => {
+  const phone = 'test-command-cooldown-' + Date.now();
+  assert.equal(await claimCommandCooldown(phone, 'help'), true);
+  assert.equal(await claimCommandCooldown(phone, 'HELP'), false);
+  assert.equal(await claimCommandCooldown(phone, 'menu'), true);
+  assert.equal(await claimCommandCooldown(phone, 'upgrade'), true);
+  assert.equal(await claimCommandCooldown(phone, 'fixtures'), true);
 });
