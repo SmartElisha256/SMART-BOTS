@@ -3,7 +3,7 @@ import { env } from '../config/env.js';
 
 const { Pool } = pkg;
 
-const pool = env.DATABASE_URL ? new Pool({
+const pool = env.NODE_ENV === 'test' && process.env.USE_TEST_DATABASE !== 'true' ? null : env.DATABASE_URL ? new Pool({
   connectionString: env.DATABASE_URL,
   max: 5,
   idleTimeoutMillis: 30000,
