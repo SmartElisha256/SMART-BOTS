@@ -3,7 +3,7 @@ import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { createMessagingAdapter } from '../providers/messaging/factory.js';
 import { processIncomingMessage } from '../services/commandService.js';
-import { checkAndConsumeDailyRequest, recordOutgoingMessage, formatQuotaLimitMessage, claimQuotaNotice } from '../services/usageService.js';
+import { checkAndConsumeDailyRequest, recordOutgoingMessage, formatQuotaLimitMessage, claimQuotaNotice, claimCommandCooldown } from '../services/usageService.js';
 import { handlePaymentCommand, isPaymentCommand, getAdminPhones } from '../services/manualPaymentService.js';
 
 function safeEqualText(left, right) {
@@ -56,6 +56,15 @@ export async function handleIncomingWebhook(req, res) {
   const provider = createMessagingAdapter();
   try {
     for (const message of messages) {
+      const utilityCommand = String(message.text ?? '').trim().split(/\\s+/, 1)[0].toLowerCase();
+      if (['help', 'menu', 'upgrade'].includes(utilityCommand)) {
+        try {
+          // Ignore repeated utility commands for 30 seconds without sending a reply.
+          if (!(await claimCommandCooldown(message.sender, utilityCommand))) continue;
+        } catch (cooldownError) {
+          logger.warn({ error: cooldownError, phone: message.sender, command: utilityCommand }, 'Could not enforce utility-command cooldown');
+        }
+      }
       let reply;
       let paymentNotification = null;
       if (isPaymentCommand(message.text)) {
