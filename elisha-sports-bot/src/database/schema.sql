@@ -74,3 +74,20 @@ CREATE TABLE IF NOT EXISTS sports_cache (
 
 CREATE INDEX IF NOT EXISTS idx_sports_cache_key ON sports_cache(cache_key);
 CREATE INDEX IF NOT EXISTS idx_sports_cache_expires_at ON sports_cache(expires_at);
+
+-- Manual Mobile Money payments are verified by a human before Premium is activated.
+CREATE TABLE IF NOT EXISTS manual_payment_requests (
+  id BIGSERIAL PRIMARY KEY,
+  phone VARCHAR(30) NOT NULL,
+  transaction_id VARCHAR(100) NOT NULL UNIQUE,
+  amount_ugx INTEGER NOT NULL CHECK (amount_ugx >= 0),
+  network VARCHAR(40) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'approved', 'rejected')),
+  reviewed_by VARCHAR(30),
+  reviewed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_manual_payment_requests_phone ON manual_payment_requests(phone);
+CREATE INDEX IF NOT EXISTS idx_manual_payment_requests_status ON manual_payment_requests(status, created_at DESC);
