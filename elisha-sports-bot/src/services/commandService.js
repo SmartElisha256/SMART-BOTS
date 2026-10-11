@@ -110,6 +110,7 @@ Available commands:
 • ANALYZE [TEAM A] vs [TEAM B] — recent-statistics analysis
 • SEASON [LEAGUE] [YEAR] — historical season summary
 • HELP — usage guide
+• UPGRADE — view Premium plans and payment steps
 • START — enable notifications
 • STOP — disable notifications`;
 }
