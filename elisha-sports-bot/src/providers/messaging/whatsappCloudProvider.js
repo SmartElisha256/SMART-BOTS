@@ -13,17 +13,21 @@ export class WhatsAppCloudProvider extends MessagingProvider {
     this.apiBaseUrl = apiBaseUrl.replace(/\/$/, '');
   }
 
-  async sendMessage({ to, text }) {
-    if (!to || typeof to !== 'string') throw new Error('Target phone number (to) is required.');
-    if (!text || typeof text !== 'string' || !text.trim()) throw new Error('Message text is required.');
+  assertConfigured() {
     if (!this.accessToken || this.accessToken === 'replace-me' || !this.phoneNumberId || this.phoneNumberId === 'replace-me') {
       throw new Error('WhatsApp Cloud API credentials are missing. Configure WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID.');
     }
+  }
 
-    const response = await fetch(`${this.apiBaseUrl}/${this.phoneNumberId}/messages`, {
+  async sendMessage({ to, text }) {
+    if (!to || typeof to !== 'string') throw new Error('Target phone number (to) is required.');
+    if (!text || typeof text !== 'string' || !text.trim()) throw new Error('Message text is required.');
+    this.assertConfigured();
+
+    const response = await fetch(this.apiBaseUrl + '/' + this.phoneNumberId + '/messages', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${this.accessToken}`,
+        Authorization: 'Bearer ' + this.accessToken,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -37,7 +41,39 @@ export class WhatsAppCloudProvider extends MessagingProvider {
 
     if (!response.ok) {
       const body = await response.text().catch(() => '');
-      throw new Error(`WhatsApp Cloud API request failed (${response.status}): ${body.slice(0, 300)}`);
+      throw new Error('WhatsApp Cloud API request failed (' + response.status + '): ' + body.slice(0, 300));
+    }
+
+    const data = await response.json().catch(() => ({}));
+    return { ok: true, provider: 'whatsapp-cloud', to, messageId: data.messages?.[0]?.id ?? null };
+  }
+
+  async sendImageById({ to, mediaId, caption = '' }) {
+    if (!to || typeof to !== 'string') throw new Error('Target phone number (to) is required.');
+    if (!mediaId || typeof mediaId !== 'string') throw new Error('WhatsApp media ID is required.');
+    this.assertConfigured();
+
+    const image = { id: mediaId };
+    if (caption && String(caption).trim()) image.caption = String(caption).trim().slice(0, 1024);
+
+    const response = await fetch(this.apiBaseUrl + '/' + this.phoneNumberId + '/messages', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + this.accessToken,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to,
+        type: 'image',
+        image
+      })
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error('WhatsApp Cloud API image request failed (' + response.status + '): ' + body.slice(0, 300));
     }
 
     const data = await response.json().catch(() => ({}));
