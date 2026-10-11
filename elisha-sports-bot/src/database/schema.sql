@@ -47,6 +47,21 @@ CREATE INDEX IF NOT EXISTS idx_message_events_phone ON message_events(phone);
 CREATE INDEX IF NOT EXISTS idx_message_events_hash ON message_events(message_hash);
 CREATE INDEX IF NOT EXISTS idx_message_events_created_at ON message_events(created_at DESC);
 
+-- Daily quota counters use Kampala's calendar date and are shared across app instances.
+CREATE TABLE IF NOT EXISTS daily_usage (
+  id BIGSERIAL PRIMARY KEY,
+  phone VARCHAR(30) NOT NULL,
+  usage_date DATE NOT NULL,
+  requests_used INTEGER NOT NULL DEFAULT 0 CHECK (requests_used >= 0),
+  outgoing_messages INTEGER NOT NULL DEFAULT 0 CHECK (outgoing_messages >= 0),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (phone, usage_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_daily_usage_date ON daily_usage(usage_date DESC);
+CREATE INDEX IF NOT EXISTS idx_daily_usage_phone_date ON daily_usage(phone, usage_date DESC);
+
 -- Cache table for sports data
 CREATE TABLE IF NOT EXISTS sports_cache (
   id SERIAL PRIMARY KEY,
