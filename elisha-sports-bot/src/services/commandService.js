@@ -143,7 +143,7 @@ LIVE
 START / STOP
   Enable or disable match notifications.
 
-Reply MENU for all commands.`;
+UPGRADE\n  Shows Premium plans and manual payment instructions. Activation requires administrator verification.\n\nReply MENU for all commands.`;
 }
 
 async function handleFixturesCommand(args) {
