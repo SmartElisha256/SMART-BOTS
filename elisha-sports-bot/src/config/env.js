@@ -35,7 +35,9 @@ const envSchema = z.object({
   JOB_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
   JOB_CONCURRENCY: z.coerce.number().int().positive().default(5),
   RATE_LIMIT_POINTS: z.coerce.number().int().positive().default(30),
-  RATE_LIMIT_DURATION: z.coerce.number().int().positive().default(60)
+  RATE_LIMIT_DURATION: z.coerce.number().int().positive().default(60),
+  FREE_DAILY_REQUEST_LIMIT: z.coerce.number().int().positive().default(20),
+  PREMIUM_DAILY_REQUEST_LIMIT: z.coerce.number().int().positive().default(200)
 });
 
 export const env = envSchema.parse(process.env);
@@ -61,6 +63,10 @@ export function validateEnvironment() {
     sportsDataProvider: env.SPORTS_DATA_PROVIDER,
     sportsApiConfigured: Boolean(env.SPORTS_API_KEY),
     aiAnalysisConfigured: Boolean(env.OPENAI_API_KEY),
+    dailyRequestLimits: {
+      free: env.FREE_DAILY_REQUEST_LIMIT,
+      premium: env.PREMIUM_DAILY_REQUEST_LIMIT
+    },
     cacheTTLs: {
       fixtures: env.CACHE_TTL_FIXTURES,
       table: env.CACHE_TTL_TABLE,
