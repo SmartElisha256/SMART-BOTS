@@ -56,7 +56,7 @@ export async function handleIncomingWebhook(req, res) {
   const provider = createMessagingAdapter();
   try {
     for (const message of messages) {
-      const utilityCommand = String(message.text ?? '').trim().split(/\\s+/, 1)[0].toLowerCase();
+      const utilityCommand = String(message.text ?? '').trim().split(/\s+/, 1)[0].toLowerCase();
       if (['help', 'menu', 'upgrade'].includes(utilityCommand)) {
         try {
           // Ignore repeated utility commands for 30 seconds without sending a reply.
