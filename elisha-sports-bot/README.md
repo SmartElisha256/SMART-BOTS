@@ -7,6 +7,9 @@ Node.js/Express starter for a WhatsApp football-information bot.
 - WhatsApp webhook verification and inbound text-message handling are implemented.
 - Outbound messaging adapters: mock, CallMeBot, and WhatsApp Cloud API.
 - PostgreSQL user/preferences/subscription storage and Redis caching/rate limiting are wired in.
+- Daily Free/Premium request quotas are enforced for football-data commands. Free defaults to 20 requests/day; Premium defaults to 200 requests/day. Quotas reset at midnight Africa/Kampala time and are stored in PostgreSQL so they persist across restarts and app instances.
+- Daily usage also records outgoing-message counts for basic WhatsApp usage monitoring. This counter is not a billing ledger and does not itself calculate Meta charges.
+- Premium quota applies when a user's phone number has an active Premium subscription record. Payment collection and automatic payment verification/activation are not implemented yet; an administrator must verify payment and activate the subscription.
 - Sports data supports a mock provider and an API-Football provider. Mock remains the safe default; real data requires `SPORTS_DATA_PROVIDER=api-football` and a valid `SPORTS_API_KEY`.
 - Commands include upcoming fixtures, live scores, league tables, recent team form, and head-to-head records when the configured data provider supports them.
 - Match summaries should clearly separate confirmed statistics from uncertainty. The bot is for football information and analysis, not betting recommendations or guarantees of match outcomes.
@@ -30,7 +33,9 @@ Start the services:
 
     docker compose up --build
 
-Docker Compose starts PostgreSQL and Redis, initializes the schema on a new database volume, and waits for both services to be healthy before starting the app. If you already have a populated pgdata volume, Docker will not rerun the initialization script; apply `src/database/schema.sql` to that database manually.
+Docker Compose starts PostgreSQL and Redis, initializes the schema on a new database volume, and waits for both services to be healthy before starting the app. If you already have a populated pgdata volume, Docker will not rerun the initialization script; apply the updated schema manually:
+
+    docker compose exec -T postgres psql -U postgres -d elisha_sports_bot < src/database/schema.sql
 
 Check the service:
 
@@ -53,7 +58,22 @@ If running Node on your computer instead of inside Docker, copy `.env.example` t
 - TABLE [LEAGUE]
 - FORM TEAM
 - H2H TEAM A vs TEAM B
+- ANALYZE TEAM A vs TEAM B
+- SEASON [LEAGUE] [YEAR]
 - START and STOP for notification preferences
+
+The daily quota counts data commands (FIXTURES, LIVE, TABLE, FORM, H2H, ANALYZE, and SEASON). MENU, HELP, START, STOP, and unknown commands do not consume the daily request allowance. Each incoming WhatsApp text message is still subject to the separate HTTP rate limiter at the webhook/server level.
+
+## Configure daily quotas
+
+In `.env`:
+
+    FREE_DAILY_REQUEST_LIMIT=20
+    PREMIUM_DAILY_REQUEST_LIMIT=200
+
+Change the numbers to suit your capacity and WhatsApp budget. Quotas reset at midnight in `Africa/Kampala` time. The quota counter uses an atomic PostgreSQL UPSERT to prevent concurrent requests from bypassing the limit. If PostgreSQL is unavailable, quota checks fail closed for tracked commands rather than allowing unlimited usage.
+
+When a Free user reaches the limit, the bot shows the used count and reset time and explains that Premium offers a higher limit. Premium activation is not self-service yet: payment verification and activating the subscription record still need to be implemented. Do not activate Premium solely because a user sends a message claiming to have paid.
 
 ## Configure real football data and optional AI summaries
 

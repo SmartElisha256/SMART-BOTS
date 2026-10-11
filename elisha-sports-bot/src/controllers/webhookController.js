@@ -3,6 +3,7 @@ import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { createMessagingAdapter } from '../providers/messaging/factory.js';
 import { processIncomingMessage } from '../services/commandService.js';
+import { checkAndConsumeDailyRequest, recordOutgoingMessage, formatQuotaLimitMessage } from '../services/usageService.js';
 
 function safeEqualText(left, right) {
   const a = Buffer.from(String(left ?? ''));
@@ -55,12 +56,22 @@ export async function handleIncomingWebhook(req, res) {
   const provider = createMessagingAdapter();
   try {
     for (const message of messages) {
-      const reply = await processIncomingMessage({
-        sender: message.sender,
-        message: message.text,
-        provider: 'whatsapp'
-      });
+      const quota = await checkAndConsumeDailyRequest(message.sender, message.text);
+      const reply = quota.allowed
+        ? await processIncomingMessage({
+            sender: message.sender,
+            message: message.text,
+            provider: 'whatsapp'
+          })
+        : formatQuotaLimitMessage(quota);
+
       await provider.sendMessage({ to: message.sender, text: reply });
+      try {
+        await recordOutgoingMessage(message.sender);
+      } catch (usageError) {
+        // Message delivery should not be reported as failed just because analytics failed.
+        logger.warn({ error: usageError, phone: message.sender }, 'Could not record outgoing message usage');
+      }
     }
     return res.sendStatus(200);
   } catch (error) {
