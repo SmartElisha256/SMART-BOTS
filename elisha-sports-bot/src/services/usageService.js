@@ -31,14 +31,25 @@ export async function claimCommandCooldown(phone, command, cooldownSeconds = 30)
     return true;
   }
 
-  const result = await pool.query(
-    'INSERT INTO command_cooldowns (phone, command, last_sent_at) VALUES ($1, $2, NOW()) ' +
-    'ON CONFLICT (phone, command) DO UPDATE SET last_sent_at = NOW() ' +
-    'WHERE command_cooldowns.last_sent_at <= NOW() - ($3 * INTERVAL \'1 second\') ' +
-    'RETURNING last_sent_at',
-    [phone, normalizedCommand, seconds]
-  );
-  return result.rows.length > 0;
+  try {
+    const result = await pool.query(
+      'INSERT INTO command_cooldowns (phone, command, last_sent_at) VALUES ($1, $2, NOW()) ' +
+      'ON CONFLICT (phone, command) DO UPDATE SET last_sent_at = NOW() ' +
+      'WHERE command_cooldowns.last_sent_at <= NOW() - ($3 * INTERVAL \'1 second\') ' +
+      'RETURNING last_sent_at',
+      [phone, normalizedCommand, seconds]
+    );
+    return result.rows.length > 0;
+  } catch {
+    // Fall back to this process's memory if the cooldown table is not yet migrated
+    // or the database is temporarily unavailable.
+    const key = String(phone) + ':' + normalizedCommand;
+    const now = Date.now();
+    const lastSentAt = inMemoryCommandCooldowns.get(key);
+    if (lastSentAt !== undefined && now - lastSentAt < seconds * 1000) return false;
+    inMemoryCommandCooldowns.set(key, now);
+    return true;
+  }
 }
 
 /**
