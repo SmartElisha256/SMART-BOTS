@@ -10,6 +10,37 @@ const inMemoryUsage = new Map();
 const inMemoryMonthlyUsage = new Map();
 const inMemoryQuotaNotices = new Map();
 
+const inMemoryCommandCooldowns = new Map();
+const COOLDOWN_COMMANDS = new Set(['help', 'menu', 'upgrade']);
+
+/**
+ * Allow HELP, MENU, and UPGRADE once per user per command every 30 seconds.
+ * PostgreSQL storage keeps the cooldown shared across bot instances/restarts.
+ */
+export async function claimCommandCooldown(phone, command, cooldownSeconds = 30) {
+  const normalizedCommand = String(command ?? '').trim().toLowerCase();
+  if (!COOLDOWN_COMMANDS.has(normalizedCommand)) return true;
+
+  const seconds = Math.max(0, Number(cooldownSeconds) || 0);
+  if (!pool) {
+    const key = String(phone) + ':' + normalizedCommand;
+    const now = Date.now();
+    const lastSentAt = inMemoryCommandCooldowns.get(key);
+    if (lastSentAt !== undefined && now - lastSentAt < seconds * 1000) return false;
+    inMemoryCommandCooldowns.set(key, now);
+    return true;
+  }
+
+  const result = await pool.query(
+    'INSERT INTO command_cooldowns (phone, command, last_sent_at) VALUES ($1, $2, NOW()) ' +
+    'ON CONFLICT (phone, command) DO UPDATE SET last_sent_at = NOW() ' +
+    'WHERE command_cooldowns.last_sent_at <= NOW() - ($3 * INTERVAL \'1 second\') ' +
+    'RETURNING last_sent_at',
+    [phone, normalizedCommand, seconds]
+  );
+  return result.rows.length > 0;
+}
+
 /**
  * Claim one quota-warning message per user and quota period. This keeps repeated
  * commands from generating repeated, potentially chargeable WhatsApp replies.
