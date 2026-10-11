@@ -7,7 +7,8 @@ import {
   getMonthlyRequestLimit,
   getKampalaDate,
   getNextKampalaMidnight,
-  formatQuotaLimitMessage
+  formatQuotaLimitMessage,
+  claimQuotaNotice
 } from '../src/services/usageService.js';
 
 test('tracks football-data commands but not help or preference commands', () => {
@@ -46,11 +47,26 @@ test('free and premium limit messages show the reset time and appropriate plan t
   const freeMessage = formatQuotaLimitMessage({ plan: 'free', limit: 20, used: 20, resetAt });
   const premiumMessage = formatQuotaLimitMessage({ plan: 'premium', limit: 10, used: 10, monthlyLimit: 300, monthlyUsed: 10, resetAt });
   assert.match(freeMessage, /FREE DAILY LIMIT REACHED/);
-  assert.match(freeMessage, /Premium activation is not automatic yet/);
+  assert.match(freeMessage, /free allowance resets at/);
+  assert.match(freeMessage, /Send UPGRADE/);
+  assert.match(freeMessage, /MENU or HELP/);
+  assert.match(freeMessage, /Avoid repeatedly sending the same request/);
   assert.match(premiumMessage, /PREMIUM DAILY LIMIT REACHED/);
-  assert.match(premiumMessage, /wait until it resets/);
+  assert.match(premiumMessage, /Wait for the daily reset/);
+  assert.match(premiumMessage, /Send UPGRADE/);
   assert.match(premiumMessage, /Monthly usage: 10\/300 requests/);
   const monthlyMessage = formatQuotaLimitMessage({ plan: 'premium', period: 'month', limit: 300, used: 300, monthlyLimit: 300, monthlyUsed: 300 });
   assert.match(monthlyMessage, /PREMIUM MONTHLY LIMIT REACHED/);
   assert.match(monthlyMessage, /300\/300 requests/);
+  assert.match(monthlyMessage, /1st of next month/);
+  assert.match(monthlyMessage, /Send UPGRADE/);
+});
+
+
+test('quota notices are claimed only once per user and quota period', async () => {
+  const phone = 'test-quota-notice-' + Date.now();
+  assert.equal(await claimQuotaNotice(phone, 'day'), true);
+  assert.equal(await claimQuotaNotice(phone, 'day'), false);
+  assert.equal(await claimQuotaNotice(phone, 'month'), true);
+  assert.equal(await claimQuotaNotice(phone, 'month'), false);
 });

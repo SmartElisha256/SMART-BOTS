@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS daily_usage (
   id BIGSERIAL PRIMARY KEY, phone VARCHAR(30) NOT NULL, usage_date DATE NOT NULL,
   requests_used INTEGER NOT NULL DEFAULT 0 CHECK (requests_used >= 0),
   outgoing_messages INTEGER NOT NULL DEFAULT 0 CHECK (outgoing_messages >= 0),
+  daily_quota_notice_sent_at TIMESTAMPTZ,
+  monthly_quota_notice_sent_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE (phone, usage_date)
 );

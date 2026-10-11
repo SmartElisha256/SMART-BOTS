@@ -8,6 +8,71 @@ export const QUOTA_TRACKED_COMMANDS = new Set([
 
 const inMemoryUsage = new Map();
 const inMemoryMonthlyUsage = new Map();
+const inMemoryQuotaNotices = new Map();
+
+/**
+ * Claim one quota-warning message per user and quota period. This keeps repeated
+ * commands from generating repeated, potentially chargeable WhatsApp replies.
+ */
+export async function claimQuotaNotice(phone, period = 'day') {
+  const normalizedPeriod = period === 'month' ? 'month' : 'day';
+  const periodKey = normalizedPeriod === 'month' ? getKampalaMonth() : getKampalaDate();
+  const memoryKey = `${phone}:${normalizedPeriod}:${periodKey}`;
+
+  if (!pool) {
+    if (inMemoryQuotaNotices.has(memoryKey)) return false;
+    inMemoryQuotaNotices.set(memoryKey, true);
+    return true;
+  }
+
+  const column = normalizedPeriod === 'month'
+    ? 'monthly_quota_notice_sent_at'
+    : 'daily_quota_notice_sent_at';
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`quota-notice:${phone}`]);
+
+    const existing = normalizedPeriod === 'month'
+      ? await client.query(
+          `SELECT 1 FROM daily_usage
+            WHERE phone = $1
+              AND usage_date >= date_trunc('month', NOW() AT TIME ZONE 'Africa/Kampala')::date
+              AND usage_date < (date_trunc('month', NOW() AT TIME ZONE 'Africa/Kampala') + INTERVAL '1 month')::date
+              AND ${column} IS NOT NULL
+            LIMIT 1`,
+          [phone]
+        )
+      : await client.query(
+          `SELECT 1 FROM daily_usage
+            WHERE phone = $1
+              AND usage_date = (NOW() AT TIME ZONE 'Africa/Kampala')::date
+              AND ${column} IS NOT NULL
+            LIMIT 1`,
+          [phone]
+        );
+
+    if (existing.rows.length) {
+      await client.query('ROLLBACK');
+      return false;
+    }
+
+    await client.query(
+      `INSERT INTO daily_usage (phone, usage_date, ${column})
+       VALUES ($1, (NOW() AT TIME ZONE 'Africa/Kampala')::date, NOW())
+       ON CONFLICT (phone, usage_date)
+       DO UPDATE SET ${column} = NOW(), updated_at = NOW()`,
+      [phone]
+    );
+    await client.query('COMMIT');
+    return true;
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch {}
+    throw error;
+  } finally {
+    client.release();
+  }
+}
 
 export function getCommandName(message) {
   return String(message ?? '').trim().split(/\s+/, 1)[0].toLowerCase();
@@ -225,7 +290,16 @@ export function formatQuotaLimitMessage({
   resetAt = getNextKampalaMidnight()
 }) {
   if (period === 'month') {
-    return `⏳ PREMIUM MONTHLY LIMIT REACHED\n\nYou've used ${monthlyUsed ?? used}/${monthlyLimit ?? limit} requests for this month. Your monthly quota resets on the 1st of next month (East Africa Time). You can still use MENU and HELP.`;
+    return `⏳ PREMIUM MONTHLY LIMIT REACHED
+
+Your Premium monthly allowance is used up (${monthlyUsed ?? used}/${monthlyLimit ?? limit} requests). Football-data commands are paused until the 1st of next month at 12:00 AM East Africa Time (Kampala).
+
+What you can do now:
+• Send UPGRADE to view available Premium plans and payment steps.
+• Send MENU or HELP to see available commands.
+• Avoid repeatedly resending football commands; they will stay blocked until the monthly reset.
+
+Your next monthly allowance starts automatically at the beginning of next month.`;
   }
 
   const resetText = new Intl.DateTimeFormat('en-UG', {
@@ -236,8 +310,26 @@ export function formatQuotaLimitMessage({
 
   if (plan === 'premium') {
     const monthlyText = monthlyLimit === null ? '' : `\nMonthly usage: ${monthlyUsed ?? 0}/${monthlyLimit} requests.`;
-    return `⏳ PREMIUM DAILY LIMIT REACHED\n\nYou've used ${used}/${limit} requests for today. Your daily quota resets at ${resetText} East Africa Time. Please wait until it resets.${monthlyText}`;
+    return `⏳ PREMIUM DAILY LIMIT REACHED
+
+You've used all ${used}/${limit} Premium football requests available for today. Football-data commands are paused until ${resetText} East Africa Time (Kampala).
+
+What to do next:
+• Wait for the daily reset; your daily allowance returns automatically.
+• Send UPGRADE to view plans or payment instructions.
+• Send MENU or HELP for commands that remain available.${monthlyText}
+
+Tip: each FIXTURES, LIVE, TABLE, FORM, H2H, ANALYZE, or SEASON request uses one request. Avoid repeating the same request while waiting.`;
   }
 
-  return `⏳ FREE DAILY LIMIT REACHED\n\nYou've used ${used}/${limit} free requests for today. Your free quota resets at ${resetText} East Africa Time.\n\nWant a higher limit? Upgrade to Premium. Premium activation is not automatic yet; payment and subscription status must be verified by the bot administrator.`;
+  return `⏳ FREE DAILY LIMIT REACHED
+
+You've used all ${used}/${limit} free football requests for today, so football-data commands are temporarily paused. Your free allowance resets at ${resetText} East Africa Time (Kampala); you do not need to pay to use the free tier again after that time.
+
+What to do next:
+• Wait until the reset time; your free requests return automatically.
+• Send UPGRADE to view Premium plans if you need more access before the reset.
+• Send MENU or HELP to see commands that remain available.
+
+How to avoid reaching the limit: each FIXTURES, LIVE, TABLE, FORM, H2H, ANALYZE, or SEASON request uses one free request. Avoid repeatedly sending the same request. After the first warning, repeated football requests will not get another warning until the allowance resets.`;
 }

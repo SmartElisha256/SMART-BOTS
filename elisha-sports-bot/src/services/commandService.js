@@ -110,6 +110,7 @@ Available commands:
 • ANALYZE [TEAM A] vs [TEAM B] — recent-statistics analysis
 • SEASON [LEAGUE] [YEAR] — historical season summary
 • HELP — usage guide
+• UPGRADE — view Premium plans and payment steps
 • START — enable notifications
 • STOP — disable notifications`;
 }
@@ -143,7 +144,7 @@ LIVE
 START / STOP
   Enable or disable match notifications.
 
-Reply MENU for all commands.`;
+UPGRADE\n  Shows Premium plans and manual payment instructions. Activation requires administrator verification.\n\nReply MENU for all commands.`;
 }
 
 async function handleFixturesCommand(args) {
