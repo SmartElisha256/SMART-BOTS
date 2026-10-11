@@ -7,7 +7,8 @@ import {
   getMonthlyRequestLimit,
   getKampalaDate,
   getNextKampalaMidnight,
-  formatQuotaLimitMessage
+  formatQuotaLimitMessage,
+  claimQuotaNotice
 } from '../src/services/usageService.js';
 
 test('tracks football-data commands but not help or preference commands', () => {
@@ -53,4 +54,13 @@ test('free and premium limit messages show the reset time and appropriate plan t
   const monthlyMessage = formatQuotaLimitMessage({ plan: 'premium', period: 'month', limit: 300, used: 300, monthlyLimit: 300, monthlyUsed: 300 });
   assert.match(monthlyMessage, /PREMIUM MONTHLY LIMIT REACHED/);
   assert.match(monthlyMessage, /300\/300 requests/);
+});
+
+
+test('quota notices are claimed only once per user and quota period', async () => {
+  const phone = 'test-quota-notice-' + Date.now();
+  assert.equal(await claimQuotaNotice(phone, 'day'), true);
+  assert.equal(await claimQuotaNotice(phone, 'day'), false);
+  assert.equal(await claimQuotaNotice(phone, 'month'), true);
+  assert.equal(await claimQuotaNotice(phone, 'month'), false);
 });
