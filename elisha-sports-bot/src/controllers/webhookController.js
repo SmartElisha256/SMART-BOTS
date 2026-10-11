@@ -3,7 +3,7 @@ import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { createMessagingAdapter } from '../providers/messaging/factory.js';
 import { processIncomingMessage } from '../services/commandService.js';
-import { checkAndConsumeDailyRequest, recordOutgoingMessage, formatQuotaLimitMessage } from '../services/usageService.js';
+import { checkAndConsumeDailyRequest, recordOutgoingMessage, formatQuotaLimitMessage, claimQuotaNotice } from '../services/usageService.js';
 import { handlePaymentCommand, isPaymentCommand, getAdminPhones } from '../services/manualPaymentService.js';
 
 function safeEqualText(left, right) {
@@ -70,9 +70,15 @@ export async function handleIncomingWebhook(req, res) {
         }
       } else {
         const quota = await checkAndConsumeDailyRequest(message.sender, message.text);
-        reply = quota.allowed
-          ? await processIncomingMessage({ sender: message.sender, message: message.text, provider: 'whatsapp' })
-          : formatQuotaLimitMessage(quota);
+        if (!quota.allowed) {
+          const period = quota.period === 'month' ? 'month' : 'day';
+          // Once the user has received this period's limit notice, stop replying
+          // to repeated over-limit commands to avoid unnecessary WhatsApp charges.
+          if (!(await claimQuotaNotice(message.sender, period))) continue;
+          reply = formatQuotaLimitMessage(quota);
+        } else {
+          reply = await processIncomingMessage({ sender: message.sender, message: message.text, provider: 'whatsapp' });
+        }
       }
       await provider.sendMessage({ to: message.sender, text: reply || 'I could not process that message. Send HELP for available commands.' });
       try { await recordOutgoingMessage(message.sender); }
