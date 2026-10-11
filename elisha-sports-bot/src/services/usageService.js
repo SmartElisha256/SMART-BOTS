@@ -236,7 +236,7 @@ export function formatQuotaLimitMessage({
 
   if (plan === 'premium') {
     const monthlyText = monthlyLimit === null ? '' : `\nMonthly usage: ${monthlyUsed ?? 0}/${monthlyLimit} requests.`;
-    return `⏳ PREMIUM DAILY LIMIT REACHED\n\nYou've used ${used}/${limit} requests for today. Your daily quota resets at ${resetText} East Africa Time.${monthlyText}`;
+    return `⏳ PREMIUM DAILY LIMIT REACHED\n\nYou've used ${used}/${limit} requests for today. Your daily quota resets at ${resetText} East Africa Time. Please wait until it resets.${monthlyText}`;
   }
 
   return `⏳ FREE DAILY LIMIT REACHED\n\nYou've used ${used}/${limit} free requests for today. Your free quota resets at ${resetText} East Africa Time.\n\nWant a higher limit? Upgrade to Premium. Premium activation is not automatic yet; payment and subscription status must be verified by the bot administrator.`;
