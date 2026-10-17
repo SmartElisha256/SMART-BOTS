@@ -28,6 +28,17 @@ Training is a separate operation. Runtime predictions only load saved artifacts;
 
 For a quick pipeline smoke test only, use data/synthetic_matches.csv; never interpret those metrics as actual football forecasting performance.
 
+## Data-quality audit and team form report
+
+Before training or publishing historical statistics, inspect the source CSV:
+
+    python audit_data.py --data data/epl_historical.csv
+    python audit_data.py --data data/epl_historical.csv --team "Arsenal" --as-of 2025-05-25 --limit 5
+
+The audit reports rows read/accepted, invalid dates, missing or invalid scores, blank team names, self-fixtures, duplicate fixture groups, date coverage, and whether the CSV explicitly labels itself synthetic. The optional team report summarizes the latest completed matches before the cutoff: W/D/L, points, goals for/against, opponent, venue and score.
+
+The audit deliberately excludes invalid rows from its team-form summary and reports the counts. It cannot prove a CSV is authentic: verify the source provider, original download, season coverage and data licence yourself. Do not treat synthetic data or a filename as proof of real-world quality.
+
 ## Prediction CLI
 
     python predict.py --home-team "Example FC" --away-team "Sample United"
