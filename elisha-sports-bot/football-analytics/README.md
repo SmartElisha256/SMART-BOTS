@@ -1,61 +1,62 @@
 # Football Analytics ML Module
 
-This is an optional Python module alongside the existing ELISHA SPORTS BOT Node.js app. It does not replace the Node app.
+This optional Python module works alongside the ELISHA SPORTS BOT Node.js app. Node.js handles chat/webhooks; Python validates historical data, trains models, evaluates them and returns structured predictions.
 
-## Important data note
+## Data and safety
 
-`data/synthetic_matches.csv` is deterministic **synthetic test data**, not real historical match results. Metrics or predictions from it are only pipeline demonstrations and must not be interpreted as evidence of real-world accuracy. For meaningful use, import a properly licensed, documented historical dataset.
+The repository contains five EPL season CSVs (2020/21 through 2024/25) plus data/synthetic_matches.csv. The synthetic file is only for deterministic pipeline tests; results from it are NOT evidence of real-world accuracy. Check the source, licensing, and completeness of any real dataset before using it.
 
-## Setup
+## Setup and recommended workflow
 
 Python 3.10+ is recommended. From this directory:
 
-```bash
-python -m venv .venv
-# Linux/macOS
-source .venv/bin/activate
-# Windows PowerShell: .venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-python download_data.py --input data/synthetic_matches.csv
-python train.py --data data/synthetic_matches.csv
-python evaluate.py --data data/synthetic_matches.csv
-pytest -q
-```
+    python -m venv .venv
+    # Linux/macOS: source .venv/bin/activate
+    # Windows PowerShell: .venv\Scripts\Activate.ps1
+    python -m pip install -r requirements.txt
 
-Training is a separate operation. Runtime predictions only load saved artifacts; they do not retrain models.
+    # Combine the five included season CSVs into one normalized dataset.
+    python prepare_epl_data.py
+    python download_data.py --input data/epl_historical.csv
+
+    # Train artifacts, then evaluate on a chronological holdout.
+    python train.py --data data/epl_historical.csv
+    python evaluate.py --data data/epl_historical.csv
+    pytest -q
+
+Training is a separate operation. Runtime predictions only load saved artifacts; they do not retrain models. Generated model files are ignored by Git and must be created in each deployment environment.
+
+For a quick pipeline smoke test only, use data/synthetic_matches.csv; never interpret those metrics as actual football forecasting performance.
 
 ## Prediction CLI
 
-```bash
-python predict.py --home-team "Example FC" --away-team "Sample United"
-```
+    python predict.py --home-team "Example FC" --away-team "Sample United"
 
-The command prints JSON. It requires trained artifacts and at least 20 completed matches dated before the prediction cutoff.
+The command prints JSON. It requires trained artifacts and at least 20 completed historical matches before the prediction cutoff.
 
 ## Optional CSV fetch
 
-Set `FOOTBALL_RESULTS_CSV_URL` to a trusted HTTPS URL returning a CSV with columns `match_date,home_team,away_team,home_goals,away_goals`, then run:
+Set FOOTBALL_RESULTS_CSV_URL to a trusted HTTPS URL returning a CSV with columns match_date,home_team,away_team,home_goals,away_goals, then run:
 
-```bash
-python fetch_matches.py --output data/matches.csv
-python download_data.py --input data/matches.csv
-python train.py --data data/matches.csv
-```
+    python fetch_matches.py --output data/matches.csv
+    python download_data.py --input data/matches.csv
+    python train.py --data data/matches.csv
+    python evaluate.py --data data/matches.csv
 
 No API key or live provider is configured by default. Check data licensing and provider limits. Do not label a dataset official unless its source confirms that.
 
 ## Node.js endpoint
 
-The app exposes `POST /api/football-ml/predict`. JSON body:
+The app exposes POST /api/football-ml/predict. JSON body:
 
-```json
-{"home_team":"Example FC","away_team":"Sample United","kickoff":"2027-01-12T15:00:00Z"}
-```
+    {"home_team":"Example FC","away_team":"Sample United","kickoff":"2027-01-12T15:00:00Z"}
 
-It runs `predict.py` as a separate process with a timeout. Train models first and configure Python via `PYTHON_BIN` if needed. Missing models or insufficient history return a service error; the endpoint does not fabricate estimates. Existing global app rate limiting remains in effect.
+It runs predict.py as a separate process with a timeout. Train models first and configure Python via PYTHON_BIN if needed. Missing models or insufficient history return a service error; the endpoint does not fabricate estimates. Existing global app rate limiting remains in effect.
 
 ## Method and limitations
 
-Pre-match team features use only previous results (last five appearances per team). The baseline trains a random-forest 1X2 classifier and goal regressors; goal-line, BTTS, and scoreline estimates use independent Poisson approximations from regressed expected goals. Double-chance values are derived from 1X2. This is a modest baseline, not a production betting model. Evaluation uses a chronological holdout; larger real datasets, calibration analysis, competition-aware validation, and monitoring are needed before relying on probabilities.
+Pre-match team features use only previous results (last five appearances per team). The baseline trains a random-forest result classifier and goal regressors. The primary 1X2, double-chance, goal-line, BTTS and correct-score probabilities are derived from the same independent-Poisson score model, so related markets are internally consistent. The separate machine_learning_result field exposes the classifier's 1X2 probabilities for comparison rather than silently mixing incompatible model outputs.
 
-The API returns form summaries, expected goals, top correct-score estimates, confidence flags, and warnings. The probability values are not guarantees.
+Evaluation uses a chronological holdout. Before relying on results, add larger and more recent licensed data, probability calibration, season-by-season backtests, and ongoing monitoring. A single holdout or high accuracy score is not a guarantee of future performance.
+
+The API returns form summaries, expected goals, top correct-score estimates, data-quality warnings and conservative confidence labels. Probabilities are estimates, not guarantees or financial advice.
