@@ -327,10 +327,10 @@ async function handleAnalyzeCommand(args) {
 
 
 async function handlePredictCommand(args) {
-  if (!args || !/\\s+vs?\\s+/i.test(args)) {
+  if (!args || !/\s+vs?\s+/i.test(args)) {
     return 'Usage: PREDICT Arsenal vs Chelsea';
   }
-  const parts = args.split(/\\s+vs?\\s+/i);
+  const parts = args.split(/\s+vs?\s+/i);
   if (parts.length !== 2 || !parts[0].trim() || !parts[1].trim()) {
     return 'Usage: PREDICT Arsenal vs Chelsea';
   }
