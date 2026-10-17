@@ -10,7 +10,7 @@ from features import FEATURES, load_matches, build_training_frame
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data", default="data/synthetic_matches.csv")
+    parser.add_argument("--data", default="data/epl_historical.csv")
     parser.add_argument("--models-dir", default="models")
     args = parser.parse_args()
     raw = load_matches(args.data)
