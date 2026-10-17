@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from datetime import date
 from pathlib import Path
 import pandas as pd
 
@@ -65,27 +64,34 @@ def _features_for(home: str, away: str, history: dict) -> dict:
     }
 
 def build_training_frame(df: pd.DataFrame, window: int = 5) -> pd.DataFrame:
-    """Create pre-match features using only earlier results; then update history."""
+    """Create features from strictly earlier dates; update history after each date group."""
     history = defaultdict(lambda: deque(maxlen=window))
     rows = []
     ordered = df.sort_values("match_date", kind="stable")
-    for row in ordered.itertuples(index=False):
-        home, away = row.home_team, row.away_team
-        features = _features_for(home, away, history)
-        hg, ag = int(row.home_goals), int(row.away_goals)
-        features.update({
-            "match_date": row.match_date,
-            "home_team": home, "away_team": away,
-            "home_goals": hg, "away_goals": ag,
-            "result": "H" if hg > ag else ("A" if hg < ag else "D"),
-            "total_goals": hg + ag,
-            "btts": int(hg > 0 and ag > 0),
-        })
-        rows.append(features)
-        hp = 3 if hg > ag else (1 if hg == ag else 0)
-        ap = 3 if ag > hg else (1 if ag == hg else 0)
-        history[home].append((hg, ag, hp))
-        history[away].append((ag, hg, ap))
+
+    # A date-only historical dataset has no trustworthy kickoff ordering.
+    # All fixtures on one date must therefore share the same pre-date history.
+    for _, same_date in ordered.groupby("match_date", sort=True):
+        updates = []
+        for row in same_date.itertuples(index=False):
+            home, away = row.home_team, row.away_team
+            features = _features_for(home, away, history)
+            hg, ag = int(row.home_goals), int(row.away_goals)
+            features.update({
+                "match_date": row.match_date,
+                "home_team": home, "away_team": away,
+                "home_goals": hg, "away_goals": ag,
+                "result": "H" if hg > ag else ("A" if hg < ag else "D"),
+                "total_goals": hg + ag,
+                "btts": int(hg > 0 and ag > 0),
+            })
+            rows.append(features)
+            hp = 3 if hg > ag else (1 if hg == ag else 0)
+            ap = 3 if ag > hg else (1 if ag == hg else 0)
+            updates.append((home, away, hg, ag, hp, ap))
+        for home, away, hg, ag, hp, ap in updates:
+            history[home].append((hg, ag, hp))
+            history[away].append((ag, hg, ap))
     return pd.DataFrame(rows)
 
 def team_form(df: pd.DataFrame, team: str, as_of: str | None = None, limit: int = 5) -> dict:
