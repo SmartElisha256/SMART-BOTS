@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - repair/**
+      - fix/**
     paths:
       - "elisha-sports-bot/**"
       - ".github/workflows/elisha-sports-bot-ci.yml"
@@ -24,14 +25,8 @@ jobs:
       DATABASE_URL: postgresql://postgres:change-me@localhost:5432/elisha_sports_bot
       REDIS_URL: redis://localhost:6379
     steps:
-      - name: Check out the pull request revision, excluding the malformed legacy path
+      - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          sparse-checkout-cone-mode: false
-          sparse-checkout: |
-            /*
-            !/elisha-sports-bot/src/services/commandService.js*
-            /elisha-sports-bot/src/services/commandService.js
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:

@@ -1,9 +1,18 @@
 import { SportsDataProvider } from './sportsDataProvider.js';
 
+// Keep demonstration fixtures in the future so the mock provider remains useful
+// for local development and tests regardless of the date the project is run.
+function futureAt(daysFromNow, hour = 18, minute = 0) {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + daysFromNow);
+  date.setUTCHours(hour, minute, 0, 0);
+  return date.toISOString();
+}
+
 const fixtures = [
-  { home: 'Arsenal', away: 'Liverpool', time: '2026-10-12T18:30:00Z', score: null },
-  { home: 'Manchester City', away: 'Chelsea', time: '2026-10-13T16:00:00Z', score: null },
-  { home: 'Barcelona', away: 'Real Madrid', time: '2026-10-14T20:30:00Z', score: null },
+  { home: 'Arsenal', away: 'Liverpool', time: futureAt(1, 18, 30), score: null },
+  { home: 'Manchester City', away: 'Chelsea', time: futureAt(2, 16, 0), score: null },
+  { home: 'Barcelona', away: 'Real Madrid', time: futureAt(3, 20, 30), score: null },
   { home: 'Bayern Munich', away: 'Inter Milan', time: '2026-10-11T19:00:00Z', score: '2-1' },
   { home: 'PSG', away: 'Juventus', time: '2026-10-10T18:45:00Z', score: '1-1' }
 ];
