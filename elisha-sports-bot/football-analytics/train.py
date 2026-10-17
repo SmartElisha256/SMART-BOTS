@@ -1,11 +1,10 @@
-"""Train leakage-safe baseline models and save artifacts for runtime predictions."""
+"""Train baseline models, evaluate a chronological holdout, and save artifacts."""
 from __future__ import annotations
 import argparse, json
 from pathlib import Path
 import joblib
-import numpy as np
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.metrics import accuracy_score, log_loss, mean_absolute_error
+from sklearn.metrics import accuracy_score, mean_absolute_error
 from sklearn.preprocessing import LabelEncoder
 from features import FEATURES, load_matches, build_training_frame
 
@@ -35,16 +34,23 @@ def main():
                       "result_accuracy": float(accuracy_score(y.iloc[split:], encoder.inverse_transform(classifier.predict(holdout)))),
                       "home_goals_mae": float(mean_absolute_error(frame["home_goals"].iloc[split:], home_model.predict(holdout))),
                       "away_goals_mae": float(mean_absolute_error(frame["away_goals"].iloc[split:], away_model.predict(holdout)))}
-    # Refit production artifacts on all currently available historical rows.
+    # Production artifacts are refitted on all data. Their training cutoff is
+    # stored so they cannot be mistaken for leakage-free historical backtests.
     classifier.fit(X, encoder.transform(y))
     home_model.fit(X, frame["home_goals"])
     away_model.fit(X, frame["away_goals"])
     out = Path(args.models_dir); out.mkdir(parents=True, exist_ok=True)
-    joblib.dump({"model": classifier, "encoder": encoder, "features": list(FEATURES)}, out / "result.joblib")
+    trained_until = raw["match_date"].max().isoformat()
+    synthetic_data = bool("source" in raw and (raw["source"] == "synthetic").all())
+    joblib.dump({"model": classifier, "encoder": encoder, "features": list(FEATURES),
+                 "trained_until": trained_until, "synthetic_data": synthetic_data,
+                 "data_path": str(Path(args.data))}, out / "result.joblib")
     joblib.dump(home_model, out / "home_goals.joblib")
     joblib.dump(away_model, out / "away_goals.joblib")
     (out / "evaluation.json").write_text(json.dumps(result_metrics, indent=2) + "\n")
-    print(json.dumps({"trained_matches": len(frame), "synthetic_data": bool("source" in raw and (raw["source"] == "synthetic").all()), "evaluation": result_metrics}, indent=2))
+    print(json.dumps({"trained_matches": len(frame), "synthetic_data": synthetic_data,
+                      "data_path": str(Path(args.data)), "trained_until": trained_until,
+                      "evaluation": result_metrics}, indent=2))
 
 if __name__ == "__main__":
     main()
