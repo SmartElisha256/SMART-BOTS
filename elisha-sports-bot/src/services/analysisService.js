@@ -28,7 +28,10 @@ function fallbackAnalysis(teamA, teamB, formA, formB, h2h, matchContext = null) 
     lines.push('\nHead-to-head record is unavailable.');
   }
   if (!a && !b && (!h2h || !h2h.matches)) {
-    return 'I cannot analyze this match yet because reliable form and head-to-head data are unavailable. Configure a real sports-data provider first.';
+    lines.push('\nReliable recent-form and head-to-head records are unavailable. Treat any conclusions as incomplete.');
+    if (matchContext) lines.push(`\n${matchContext}`);
+    lines.push('\nAssessment: missing records are not evidence of player availability or team strength.');
+    return lines.join('\n');
   }
   if (matchContext) lines.push(`\n${matchContext}`);
   lines.push('\nAssessment: these statistics describe recent performance only; they do not guarantee the match result. Missing squad information is not proof of full availability.');
