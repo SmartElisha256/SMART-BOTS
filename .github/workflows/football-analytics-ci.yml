@@ -2,7 +2,7 @@ name: Football Analytics CI
 
 on:
   push:
-    branches: [main, "feature/**"]
+    branches: [main, "feature/**", "fix/**"]
     paths:
       - "elisha-sports-bot/football-analytics/**"
       - ".github/workflows/football-analytics-ci.yml"
@@ -18,14 +18,8 @@ jobs:
       run:
         working-directory: elisha-sports-bot/football-analytics
     steps:
-      - name: Check out the repository, excluding the malformed legacy path
+      - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          sparse-checkout-cone-mode: false
-          sparse-checkout: |
-            /*
-            !/elisha-sports-bot/src/services/commandService.js*
-            /elisha-sports-bot/src/services/commandService.js
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
