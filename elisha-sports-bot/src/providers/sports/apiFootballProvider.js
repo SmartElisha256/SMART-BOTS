@@ -21,7 +21,7 @@ export class ApiFootballProvider extends SportsDataProvider {
     this.fetchImpl = fetchImpl;
   }
 
-  async request(path, params = {}) {
+  async request(path, params = {}, { allowObject = false } = {}) {
     if (!env.SPORTS_API_KEY) throw new Error('SPORTS_API_KEY is not configured');
     const url = new URL(`${API_BASE}/${path.replace(/^\//, '')}`);
     for (const [key, value] of Object.entries(params)) {
@@ -36,7 +36,7 @@ export class ApiFootballProvider extends SportsDataProvider {
     if (body.errors && Object.keys(body.errors).length) {
       throw new Error('Football data API rejected the request; check API key, league, season, and plan limits');
     }
-    return Array.isArray(body.response) ? body.response : [];
+    return Array.isArray(body.response) ? body.response : (allowObject && body.response && typeof body.response === 'object' ? body.response : []);
   }
 
   async resolveLeagueId(leagueName) {
@@ -188,6 +188,73 @@ export class ApiFootballProvider extends SportsDataProvider {
       date: row.fixture?.date,
       source: 'api-football'
     }));
+  }
+
+  async getTeamAvailability(teamName) {
+    const team = await this.findTeam(teamName);
+    if (!team) return { team: teamName, status: 'unavailable', injuries: [], source: 'api-football', note: 'Team could not be resolved by the provider.' };
+    const rows = await this.request('injuries', { team: team.id, season: env.SPORTS_API_SEASON });
+    const injuries = rows.map((row) => ({
+      player: row.player?.name ?? 'Unknown player',
+      type: row.player?.type ?? null,
+      reason: row.player?.reason ?? null,
+      date: row.fixture?.date ?? null,
+      fixture: row.fixture?.id ?? null
+    }));
+    return {
+      team: team.name, status: injuries.length ? 'available' : 'no-records',
+      injuries, source: 'api-football',
+      note: injuries.length ? 'Provider injury/suspension records; check timestamps and competition coverage.' : 'No records returned. This does not confirm that the squad is fully available.'
+    };
+  }
+
+  async getTeamStrength(teamName, { league = 'Premier League' } = {}) {
+    const team = await this.findTeam(teamName);
+    if (!team) return { team: teamName, status: 'unavailable', source: 'api-football' };
+    const leagueId = await this.resolveLeagueId(league);
+    const rows = await this.request('teams/statistics', {
+      team: team.id, league: leagueId, season: env.SPORTS_API_SEASON
+    });
+    const stats = rows[0] ?? null;
+    if (!stats) return { team: team.name, status: 'no-records', source: 'api-football', note: 'No team statistics returned for this league and season.' };
+    const goals = stats.goals?.for?.total ?? {};
+    const conceded = stats.goals?.against?.total ?? {};
+    return {
+      team: team.name, status: 'available', source: 'api-football',
+      league: stats.league?.name ?? league, season: stats.league?.season ?? env.SPORTS_API_SEASON,
+      form: stats.form ?? null,
+      played: stats.fixtures?.played?.total ?? null,
+      wins: stats.fixtures?.wins?.total ?? null,
+      draws: stats.fixtures?.draws?.total ?? null,
+      losses: stats.fixtures?.loses?.total ?? null,
+      goalsFor: { total: goals.total ?? null, average: goals.average ?? null },
+      goalsAgainst: { total: conceded.total ?? null, average: conceded.average ?? null },
+      cleanSheets: stats.clean_sheet?.total ?? null,
+      failedToScore: stats.failed_to_score?.total ?? null
+    };
+  }
+
+  async getLineupContext(homeTeam, awayTeam) {
+    const [home, away] = await Promise.all([this.findTeam(homeTeam), this.findTeam(awayTeam)]);
+    if (!home || !away) return { status: 'unavailable', source: 'api-football', note: 'One or both teams could not be resolved.' };
+    const upcoming = await this.request('fixtures', { team: home.id, next: 10, timezone: 'Africa/Kampala' });
+    const fixture = upcoming.find((row) =>
+      row.teams?.home?.id === home.id && row.teams?.away?.id === away.id &&
+      ['NS', 'TBD'].includes(row.fixture?.status?.short)
+    );
+    if (!fixture) return { status: 'not-found', source: 'api-football', note: 'No matching upcoming fixture found for lineup lookup.' };
+    const rows = await this.request('fixtures/lineups', { fixture: fixture.fixture.id });
+    if (!rows.length) return { status: 'pending-or-unavailable', fixtureId: fixture.fixture.id, kickoff: fixture.fixture.date, source: 'api-football', note: 'Lineups have not been published or are unavailable from this provider.' };
+    return {
+      status: 'available', fixtureId: fixture.fixture.id, kickoff: fixture.fixture.date, source: 'api-football',
+      teams: rows.map((row) => ({
+        team: row.team?.name ?? 'Unknown team',
+        formation: row.formation ?? null,
+        coach: row.coach?.name ?? null,
+        startXI: (row.startXI ?? []).map((item) => ({ name: item.player?.name ?? 'Unknown', number: item.player?.number ?? null, position: item.player?.pos ?? null })),
+        substitutes: (row.substitutes ?? []).map((item) => ({ name: item.player?.name ?? 'Unknown', number: item.player?.number ?? null, position: item.player?.pos ?? null }))
+      }))
+    };
   }
 
   async getTeamSummary(teamName) {
