@@ -11,7 +11,7 @@ def poisson_pmf(k: int, rate: float) -> float:
     rate = max(0.0, min(float(rate), 20.0))
     return math.exp(-rate) * rate ** k / math.factorial(k)
 
-def predict(payload: dict, data_path="data/synthetic_matches.csv", models_dir="models") -> dict:
+def predict(payload: dict, data_path="data/epl_historical.csv", models_dir="models") -> dict:
     if not isinstance(payload, dict):
         raise ValueError("Request body must be a JSON object.")
     home, away = payload.get("home_team"), payload.get("away_team")
@@ -37,7 +37,7 @@ def predict(payload: dict, data_path="data/synthetic_matches.csv", models_dir="m
     models = Path(models_dir)
     needed = [models / "result.joblib", models / "home_goals.joblib", models / "away_goals.joblib"]
     if not all(path.exists() for path in needed):
-        raise FileNotFoundError("Models are not trained. Run: python train.py --data data/synthetic_matches.csv")
+        raise FileNotFoundError("Models are not trained. Run prepare_epl_data.py, then train.py --data data/epl_historical.csv")
     result_artifact = joblib.load(needed[0])
     home_model, away_model = joblib.load(needed[1]), joblib.load(needed[2])
     if cutoff is not None and result_artifact.get("trained_until"):
@@ -106,7 +106,7 @@ def predict(payload: dict, data_path="data/synthetic_matches.csv", models_dir="m
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--request-stdin", action="store_true")
-    parser.add_argument("--data", default="data/synthetic_matches.csv")
+    parser.add_argument("--data", default="data/epl_historical.csv")
     parser.add_argument("--models-dir", default="models")
     parser.add_argument("--home-team")
     parser.add_argument("--away-team")
