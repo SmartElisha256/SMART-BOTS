@@ -212,10 +212,12 @@ export class ApiFootballProvider extends SportsDataProvider {
     const team = await this.findTeam(teamName);
     if (!team) return { team: teamName, status: 'unavailable', source: 'api-football' };
     const leagueId = await this.resolveLeagueId(league);
-    const rows = await this.request('teams/statistics', {
+    const response = await this.request('teams/statistics', {
       team: team.id, league: leagueId, season: env.SPORTS_API_SEASON
-    });
-    const stats = rows[0] ?? null;
+    }, { allowObject: true });
+    // API-Football's statistics endpoint may return a single object, unlike
+    // fixture/list endpoints. Accept both response shapes explicitly.
+    const stats = Array.isArray(response) ? (response[0] ?? null) : (response ?? null);
     if (!stats) return { team: team.name, status: 'no-records', source: 'api-football', note: 'No team statistics returned for this league and season.' };
     const goals = stats.goals?.for?.total ?? {};
     const conceded = stats.goals?.against?.total ?? {};
