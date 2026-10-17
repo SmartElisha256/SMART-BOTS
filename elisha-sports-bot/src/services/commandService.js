@@ -5,6 +5,7 @@ import { getUserSubscriptions, subscribeUser, unsubscribeUser } from './subscrip
 import { getUpcomingFixtures, getLeagueTable, getTeamFormStats, getHeadToHeadRecord, getHistoricalSeasonFixtures } from './sportsService.js';
 import { formatSeasonReport } from './historicalSeasonService.js';
 import { analyzeMatch } from './analysisService.js';
+import { getFootballPrediction } from './footballMlService.js';
 import { getMatchContext, formatMatchContext } from './fixtureContextService.js';
 import { logger } from '../utils/logger.js';
 
@@ -74,6 +75,9 @@ export async function processIncomingMessage(input) {
       case 'analyze':
       case 'analysis':
         return await handleAnalyzeCommand(args);
+      case 'predict':
+      case 'model':
+        return await handlePredictCommand(args);
 
       case 'season':
       case 'historical':
@@ -109,6 +113,7 @@ Available commands:
 • FORM [TEAM] — recent results for a team
 • H2H [TEAM A] vs [TEAM B] — head-to-head stats
 • ANALYZE [TEAM A] vs [TEAM B] — form, squad availability, strength, lineups, and data-quality analysis
+• PREDICT [TEAM A] vs [TEAM B] — model-estimated match-result probabilities, expected goals, leading outcome, and reasons
 • SEASON [LEAGUE] [YEAR] — historical season summary
 • HELP — usage guide
 • UPGRADE — view Premium plans and payment steps
@@ -135,6 +140,9 @@ H2H Manchester City vs Liverpool
 
 ANALYZE Arsenal vs Chelsea
   Compares recent form, head-to-head, squad availability, team strength, lineup context, and data-quality warnings.
+
+PREDICT Arsenal vs Chelsea
+  Shows model-estimated match-result probabilities, expected goals, the leading statistical outcome, and uncertainty warnings.
 
 SEASON Premier League 2023
   Summarizes completed fixtures, points, goals, and home/away records for a historical season.
@@ -314,5 +322,23 @@ async function handleAnalyzeCommand(args) {
   } catch (error) {
     logger.error({ error, teamA, teamB }, 'Error analyzing match');
     return 'I could not analyze that match because the sports data service failed. Please try again later.';
+  }
+}
+
+
+async function handlePredictCommand(args) {
+  if (!args || !/\s+vs?\s+/i.test(args)) {
+    return 'Usage: PREDICT Arsenal vs Chelsea';
+  }
+  const parts = args.split(/\s+vs?\s+/i);
+  if (parts.length !== 2 || !parts[0].trim() || !parts[1].trim()) {
+    return 'Usage: PREDICT Arsenal vs Chelsea';
+  }
+  const [homeTeam, awayTeam] = parts.map((part) => part.trim());
+  try {
+    return await getFootballPrediction({ homeTeam, awayTeam });
+  } catch (error) {
+    logger.warn({ error, homeTeam, awayTeam }, 'Football ML prediction unavailable');
+    return `I could not generate a model outlook for ${homeTeam} vs ${awayTeam}. ${error.message} Ensure the historical EPL dataset and trained models are prepared in football-analytics.`;
   }
 }

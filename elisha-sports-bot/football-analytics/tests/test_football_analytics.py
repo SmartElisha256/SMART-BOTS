@@ -58,9 +58,14 @@ def test_training_and_prediction_schema(tmp_path):
         result = predict({"home_team": "Lakeside FC", "away_team": "Hill United"}, str(DATA), str(tmp_path))
     finally:
         os.chdir(old)
-    for key in ("match_result", "double_chance", "goal_markets", "btts", "expected_goals", "correct_score", "team_form", "confidence"):
+    for key in ("match_result", "double_chance", "goal_markets", "btts", "expected_goals", "correct_score", "team_form", "confidence", "statistical_outlook"):
         assert key in result
     assert set(result["match_result"]) == {"home_win", "draw", "away_win"}
+    outlook = result["statistical_outlook"]
+    assert outlook["most_likely_single_outcome"] in {"Lakeside FC win", "Draw", "Hill United win"}
+    assert 0 <= outlook["model_probability"] <= 1
+    assert outlook["reasons"]
+    assert "not a betting recommendation" in outlook["disclaimer"]
 
 def test_probability_validity_and_market_bounds(tmp_path):
     import os

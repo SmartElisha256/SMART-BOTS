@@ -83,19 +83,43 @@ def predict(payload: dict, data_path="data/epl_historical.csv", models_dir="mode
         goal_lines[f"under_{str(line).replace('.', '_')}"] = float(under)
     btts_yes = (1.0 - math.exp(-home_xg)) * (1.0 - math.exp(-away_xg))
     is_synthetic = bool(result_artifact.get("synthetic_data", False) or ("source" in raw and (raw["source"] == "synthetic").all()))
+    outcome_names = {"H": f"{home} win", "D": "Draw", "A": f"{away} win"}
+    top_code = max(("H", "D", "A"), key=lambda code: result_probs[code])
+    runner_up = sorted(result_probs.values(), reverse=True)[1]
+    reasons = [
+        f"The model assigns its highest single-outcome probability to {outcome_names[top_code]} ({result_probs[top_code] * 100:.1f}%).",
+        f"Estimated goals are {home_xg:.2f} for {home} and {away_xg:.2f} for {away}."
+    ]
+    home_form = team_form(raw, home, as_of=kickoff)
+    away_form = team_form(raw, away, as_of=kickoff)
+    if home_form["matches_used"] and away_form["matches_used"]:
+        reasons.append(
+            f"Recent sample: {home} {home_form['points']} points from {home_form['matches_used']} matches; "
+            f"{away} {away_form['points']} points from {away_form['matches_used']} matches."
+        )
+    if result_probs[top_code] - runner_up < 0.10:
+        reasons.append("The leading outcome is close to the next outcome, so the model sees no clear separation.")
+    if is_synthetic or len(raw) < 100:
+        reasons.append("The available dataset is limited or synthetic; treat this outlook as especially uncertain.")
     result = {
       "fixture": {"home_team": home, "away_team": away, "competition": payload.get("competition"), "kickoff": kickoff},
       "data_quality": {"status": "synthetic" if is_synthetic else ("limited" if len(raw) < 100 else "unvalidated"),
         "historical_matches": int(len(raw)), "warnings": [
         "Synthetic sample data is not evidence of real-world accuracy." if is_synthetic else "Model has not been independently validated on live competition data.",
         "Predictions are estimates, not guarantees."]},
+      "statistical_outlook": {
+        "most_likely_single_outcome": outcome_names[top_code],
+        "model_probability": float(result_probs[top_code]),
+        "reasons": reasons,
+        "disclaimer": "This is a statistical estimate, not a betting recommendation or guarantee. Football outcomes are uncertain; model probabilities may be poorly calibrated, and you can lose money if you choose to gamble."
+      },
       "match_result": {"home_win": result_probs["H"], "draw": result_probs["D"], "away_win": result_probs["A"]},
       "double_chance": {"1X": result_probs["H"] + result_probs["D"], "X2": result_probs["D"] + result_probs["A"], "12": result_probs["H"] + result_probs["A"]},
       "goal_markets": goal_lines,
       "btts": {"yes": float(btts_yes), "no": float(1.0 - btts_yes)},
       "expected_goals": {"home": home_xg, "away": away_xg},
       "correct_score": scores[:5],
-      "team_form": {"home": team_form(raw, home, as_of=kickoff), "away": team_form(raw, away, as_of=kickoff)},
+      "team_form": {"home": home_form, "away": away_form},
       "confidence": {"level": "unvalidated" if is_synthetic or len(raw) < 100 else "limited", "top_result_probability": max(result_probs.values()),
                      "warnings": ["Confidence labels are conservative and are not calibrated performance guarantees."]},
       "model": {"version": "baseline-random-forest-poisson-v2", "trained_until": result_artifact.get("trained_until", str(raw["match_date"].max())),
