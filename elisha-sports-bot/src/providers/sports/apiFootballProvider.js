@@ -21,7 +21,7 @@ export class ApiFootballProvider extends SportsDataProvider {
     this.fetchImpl = fetchImpl;
   }
 
-  async request(path, params = {}) {
+  async request(path, params = {}, { allowObject = false } = {}) {
     if (!env.SPORTS_API_KEY) throw new Error('SPORTS_API_KEY is not configured');
     const url = new URL(`${API_BASE}/${path.replace(/^\//, '')}`);
     for (const [key, value] of Object.entries(params)) {
@@ -36,7 +36,7 @@ export class ApiFootballProvider extends SportsDataProvider {
     if (body.errors && Object.keys(body.errors).length) {
       throw new Error('Football data API rejected the request; check API key, league, season, and plan limits');
     }
-    return Array.isArray(body.response) ? body.response : [];
+    return Array.isArray(body.response) ? body.response : (allowObject && body.response && typeof body.response === 'object' ? body.response : []);
   }
 
   async resolveLeagueId(leagueName) {
