@@ -88,3 +88,52 @@ def test_probability_validity_and_market_bounds(tmp_path):
 def test_invalid_fixture_request():
     with pytest.raises(ValueError):
         predict({"home_team": "Same FC", "away_team": "Same FC"}, str(DATA), "missing-models")
+
+def test_same_day_fixtures_do_not_leak_results_into_each_other():
+    from features import build_training_frame
+    rows = pd.DataFrame([
+        {"match_date": "2025-01-01T00:00:00Z", "home_team": "Arsenal", "away_team": "Chelsea", "home_goals": 2, "away_goals": 0},
+        {"match_date": "2025-01-01T00:00:00Z", "home_team": "Chelsea", "away_team": "Liverpool", "home_goals": 1, "away_goals": 1},
+        {"match_date": "2025-01-02T00:00:00Z", "home_team": "Arsenal", "away_team": "Liverpool", "home_goals": 0, "away_goals": 1},
+    ])
+    rows["match_date"] = pd.to_datetime(rows["match_date"], utc=True)
+    frame = build_training_frame(rows)
+    same_day = frame[frame["match_date"] == pd.Timestamp("2025-01-01T00:00:00Z")]
+    assert same_day["home_matches_seen"].tolist() == [0, 0]
+    assert same_day["away_matches_seen"].tolist() == [0, 0]
+    next_day = frame[frame["match_date"] == pd.Timestamp("2025-01-02T00:00:00Z")].iloc[0]
+    assert next_day["home_matches_seen"] == 1
+    assert next_day["away_matches_seen"] == 1
+
+
+def test_historical_prediction_rejects_model_trained_after_kickoff(tmp_path):
+    import os
+    from train import main
+    import joblib
+    old = os.getcwd()
+    try:
+        os.chdir(ROOT)
+        sys.argv = ["train.py", "--data", str(DATA), "--models-dir", str(tmp_path)]
+        main()
+    finally:
+        os.chdir(old)
+    dates = pd.to_datetime(pd.read_csv(DATA)["match_date"], utc=True)
+    kickoff = dates.max().isoformat()
+    with pytest.raises(ValueError, match="include matches on or after"):
+        predict({"home_team": "Lakeside FC", "away_team": "Hill United", "kickoff": kickoff}, str(DATA), str(tmp_path))
+
+
+def test_goal_line_probabilities_are_complementary(tmp_path):
+    import os
+    from train import main
+    old = os.getcwd()
+    try:
+        os.chdir(ROOT)
+        sys.argv = ["train.py", "--data", str(DATA), "--models-dir", str(tmp_path)]
+        main()
+        result = predict({"home_team": "Lakeside FC", "away_team": "Hill United"}, str(DATA), str(tmp_path))
+    finally:
+        os.chdir(old)
+    for line in ("0_5", "1_5", "2_5", "3_5"):
+        assert result["goal_markets"][f"over_{line}"] + result["goal_markets"][f"under_{line}"] == pytest.approx(1.0)
+    assert result["data_quality"]["status"] in {"synthetic", "limited", "unvalidated"}
