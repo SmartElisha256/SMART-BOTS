@@ -27,9 +27,13 @@ jobs:
           cache-dependency-path: elisha-sports-bot/football-analytics/requirements.txt
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
-      - name: Validate synthetic fixture data
+      - name: Validate synthetic fixture data for deterministic tests
         run: python download_data.py --input data/synthetic_matches.csv
-      - name: Train baseline models and report holdout metrics
-        run: python train.py --data data/synthetic_matches.csv
+      - name: Normalize preserved EPL season files
+        run: python prepare_epl_data.py
+      - name: Train baseline models on historical EPL data
+        run: python train.py --data data/epl_historical.csv
+      - name: Evaluate on a chronological EPL holdout
+        run: python evaluate.py --data data/epl_historical.csv
       - name: Run Python tests
         run: pytest -q
