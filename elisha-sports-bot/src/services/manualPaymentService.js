@@ -1,8 +1,10 @@
 import pool from '../database/pool.js';
 import { env } from '../config/env.js';
 import { subscribeUser } from './subscriptionService.js';
+import { logger } from '../utils/logger.js';
 
 const memoryPayments = new Map();
+const memoryAudit = [];
 
 export const PREMIUM_PLANS = Object.freeze({
   day: { label: '1 day', durationDays: 1, price: Number(env.PREMIUM_PRICE_DAY_UGX) },
@@ -22,6 +24,34 @@ export function isPaymentAdmin(phone) {
 }
 function validPlan(plan) {
   return Boolean(plan && Number.isInteger(plan.price) && plan.price > 0 && Number.isInteger(plan.durationDays));
+}
+
+async function recordPaymentAudit({ paymentId, action, previousStatus, newStatus, adminPhone, details, client = null }) {
+  const payload = {
+    paymentId: Number(paymentId),
+    action: String(action),
+    previousStatus: previousStatus ? String(previousStatus) : null,
+    newStatus: newStatus ? String(newStatus) : null,
+    adminPhone: String(adminPhone),
+    details: details ? String(details) : null
+  };
+
+  if (!pool) {
+    memoryAudit.push({ ...payload, createdAt: new Date().toISOString() });
+    return;
+  }
+
+  const runner = client || pool;
+  try {
+    await runner.query(
+      `INSERT INTO payment_audit_log (payment_id, action, previous_status, new_status, admin_phone, details)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [payload.paymentId, payload.action, payload.previousStatus, payload.newStatus, payload.adminPhone, payload.details]
+    );
+  } catch (error) {
+    // Audit failure must not block the payment decision itself, but must be visible.
+    logger.error({ error, paymentId: payload.paymentId, action: payload.action }, 'Failed to write payment audit log');
+  }
 }
 
 export function formatPaymentInstructions() {
@@ -132,6 +162,14 @@ export async function setPaymentPlan({ adminPhone, paymentReference, planKey }) 
       [ref, plan.price, plan.durationDays]
     );
     if (!result.rows[0]) return 'No pending transaction-ID payment found for that reference. Approved or rejected payments cannot be changed.';
+    await recordPaymentAudit({
+      paymentId: ref,
+      action: 'SETPLAN',
+      previousStatus: 'pending',
+      newStatus: 'pending',
+      adminPhone,
+      details: `Plan changed to ${key} (${plan.durationDays}d), expected UGX ${plan.price}`
+    });
     return '✅ Payment reference ' + ref + ' updated to ' + key.toUpperCase() + ' (' + plan.durationDays + ' day(s)). Expected amount is now UGX ' + plan.price.toLocaleString('en-UG') + '. Verify the actual amount paid in the merchant account before approving.';
   }
   const payment = memoryPayments.get(ref);
@@ -139,6 +177,14 @@ export async function setPaymentPlan({ adminPhone, paymentReference, planKey }) 
   payment.amountUgx = plan.price;
   payment.durationDays = plan.durationDays;
   payment.planLabel = plan.label;
+  await recordPaymentAudit({
+    paymentId: ref,
+    action: 'SETPLAN',
+    previousStatus: 'pending',
+    newStatus: 'pending',
+    adminPhone,
+    details: `Plan changed to ${key} (${plan.durationDays}d), expected UGX ${plan.price}`
+  });
   return '✅ Payment reference ' + ref + ' updated to ' + key.toUpperCase() + ' (' + plan.durationDays + ' day(s)). Expected amount is now UGX ' + plan.price.toLocaleString('en-UG') + '. Verify the actual amount paid in the merchant account before approving.';
 }
 
@@ -193,6 +239,15 @@ export async function approvePayment({ adminPhone, paymentReference }) {
         [payment.phone, durationDays]
       );
       await client.query("UPDATE manual_payment_requests SET status = 'approved', reviewed_by = $2, reviewed_at = NOW() WHERE id = $1", [ref, String(adminPhone)]);
+      await recordPaymentAudit({
+        paymentId: ref,
+        action: 'APPROVE',
+        previousStatus: 'pending',
+        newStatus: 'approved',
+        adminPhone,
+        details: `Premium activated for ${payment.phone} (${durationDays} day(s)), txn ${payment.transaction_id}`,
+        client
+      });
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK').catch(() => {});
@@ -206,6 +261,14 @@ export async function approvePayment({ adminPhone, paymentReference }) {
     await subscribeUser({ phone: payment.phone, plan: 'premium', durationDays: payment.durationDays || 7 });
     payment.status = 'approved';
     payment.reviewedBy = String(adminPhone);
+    await recordPaymentAudit({
+      paymentId: ref,
+      action: 'APPROVE',
+      previousStatus: 'pending',
+      newStatus: 'approved',
+      adminPhone,
+      details: `Premium activated for ${payment.phone} (${payment.durationDays || 7} day(s)), txn ${payment.transactionId}`
+    });
   }
   const durationDays = Number(payment.plan_duration_days || payment.durationDays || 7);
   return '✅ Premium activated for ' + payment.phone + ' for ' + durationDays + ' day(s). Payment reference: ' + ref + '. Approve only after verifying the transaction and amount.';
@@ -216,14 +279,30 @@ export async function rejectPayment({ adminPhone, paymentReference }) {
   const ref = Number(paymentReference);
   if (!Number.isSafeInteger(ref) || ref < 1) return 'Usage: REJECT PAYMENT_REFERENCE_NUMBER';
   if (pool) {
-    const result = await pool.query("UPDATE manual_payment_requests SET status = 'rejected', reviewed_by = $2, reviewed_at = NOW() WHERE id = $1 AND status = 'pending' RETURNING phone", [ref, String(adminPhone)]);
+    const result = await pool.query("UPDATE manual_payment_requests SET status = 'rejected', reviewed_by = $2, reviewed_at = NOW() WHERE id = $1 AND status = 'pending' RETURNING phone, transaction_id", [ref, String(adminPhone)]);
     if (!result.rows[0]) return 'No pending payment found for that reference.';
+    await recordPaymentAudit({
+      paymentId: ref,
+      action: 'REJECT',
+      previousStatus: 'pending',
+      newStatus: 'rejected',
+      adminPhone,
+      details: `Rejected payment for ${result.rows[0].phone}, txn ${result.rows[0].transaction_id}`
+    });
     return 'Payment reference ' + ref + ' was rejected. Premium was not activated for ' + result.rows[0].phone + '.';
   }
   const payment = memoryPayments.get(ref);
   if (!payment || payment.status !== 'pending') return 'No pending payment found for that reference.';
   payment.status = 'rejected';
   payment.reviewedBy = String(adminPhone);
+  await recordPaymentAudit({
+    paymentId: ref,
+    action: 'REJECT',
+    previousStatus: 'pending',
+    newStatus: 'rejected',
+    adminPhone,
+    details: `Rejected payment for ${payment.phone}, txn ${payment.transactionId}`
+  });
   return 'Payment reference ' + ref + ' was rejected. Premium was not activated for ' + payment.phone + '.';
 }
 

@@ -54,12 +54,42 @@ export const env = envSchema.parse(process.env);
 
 export const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
+function isPlaceholder(value) {
+  const v = String(value ?? '').trim();
+  return !v || v === 'replace-me' || v === 'SET_YOUR_MERCHANT_CODE' || v === 'change-me';
+}
+
 export function validateEnvironment() {
   const requiredVars = ['DATABASE_URL', 'REDIS_URL'];
   const missing = requiredVars.filter((key) => !process.env[key]);
 
   if (missing.length > 0) {
     throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+  }
+
+  const productionIssues = [];
+  if (env.NODE_ENV === 'production') {
+    if (env.MESSAGING_PROVIDER === 'whatsapp-cloud') {
+      if (isPlaceholder(env.WHATSAPP_TOKEN)) productionIssues.push('WHATSAPP_TOKEN');
+      if (isPlaceholder(env.WHATSAPP_PHONE_NUMBER_ID)) productionIssues.push('WHATSAPP_PHONE_NUMBER_ID');
+      if (isPlaceholder(env.WHATSAPP_WEBHOOK_VERIFY_TOKEN)) productionIssues.push('WHATSAPP_WEBHOOK_VERIFY_TOKEN');
+      if (isPlaceholder(env.WHATSAPP_APP_SECRET)) productionIssues.push('WHATSAPP_APP_SECRET');
+    }
+    if (isPlaceholder(env.MOMO_MERCHANT_CODE) || isPlaceholder(env.MOMO_MERCHANT_NAME) || !env.MOMO_NETWORK) {
+      productionIssues.push('MOMO_NETWORK / MOMO_MERCHANT_CODE / MOMO_MERCHANT_NAME');
+    }
+    if (!String(env.PAYMENT_ADMIN_PHONES || '').trim()) {
+      productionIssues.push('PAYMENT_ADMIN_PHONES');
+    }
+    if (isPlaceholder(env.DATABASE_URL) || env.DATABASE_URL.includes('change-me')) {
+      productionIssues.push('DATABASE_URL');
+    }
+  }
+
+  if (productionIssues.length) {
+    throw new Error(
+      'Production configuration incomplete. Replace placeholders for: ' + productionIssues.join(', ')
+    );
   }
 
   return {
