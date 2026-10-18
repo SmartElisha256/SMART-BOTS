@@ -28,7 +28,7 @@ test('extracts a command name from a message', () => {
 
 test('uses configured defaults for free and premium plans', () => {
   assert.equal(getDailyRequestLimit('free'), 20);
-  assert.equal(getDailyRequestLimit('premium'), 10);
+  assert.equal(getDailyRequestLimit('premium'), 200);
   assert.equal(getMonthlyRequestLimit('premium'), 300);
   assert.equal(getMonthlyRequestLimit('free'), null);
 });
