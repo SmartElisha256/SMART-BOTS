@@ -73,10 +73,12 @@ export async function processIncomingMessage(input) {
 
       case 'analyze':
       case 'analysis':
+        if (!(await hasActivePremiumSubscription(sender))) return premiumRequiredMessage();
         return await handleAnalyzeCommand(args);
 
       case 'season':
       case 'historical':
+        if (!(await hasActivePremiumSubscription(sender))) return premiumRequiredMessage();
         return await handleSeasonCommand(args);
 
       case 'start':
@@ -315,4 +317,16 @@ async function handleAnalyzeCommand(args) {
     logger.error({ error, teamA, teamB }, 'Error analyzing match');
     return 'I could not analyze that match because the sports data service failed. Please try again later.';
   }
+}
+
+
+async function hasActivePremiumSubscription(phone) {
+  const subscriptions = await getUserSubscriptions(phone);
+  return subscriptions.some((subscription) =>
+    String(subscription?.plan ?? '').toLowerCase() === 'premium' && subscription?.is_active !== false
+  );
+}
+
+function premiumRequiredMessage() {
+  return '🔒 PREMIUM FEATURE\n\nDetailed match analysis and historical season reports are available to active Premium subscribers.\n\nSend UPGRADE to view plans and payment instructions. Your access will activate only after an administrator verifies your payment.';
 }
