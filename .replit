@@ -1,7 +1,8 @@
-modules = ["nodejs-20", "python-3.12"]
+modules = ["nodejs-20", "python-3.12", "postgresql-16"]
 
 [nix]
 channel = "stable-25_05"
+packages = ["redis"]
 
 [agent]
 expertMode = true
@@ -22,13 +23,13 @@ args = "Start application"
 name = "Start application"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "cd elisha-sports-bot && NODE_ENV=test PORT=5000 npm run dev"
-waitForPort = 5000
-
 [workflows.workflow.metadata]
 outputType = "webview"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd elisha-sports-bot && bash scripts/start-replit.sh"
+waitForPort = 5000
 
 [[ports]]
 localPort = 5000
