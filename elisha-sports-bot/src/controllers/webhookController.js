@@ -49,7 +49,8 @@ export async function handleIncomingWebhook(req, res) {
   for (const entry of entries) {
     for (const change of entry.changes ?? []) {
       for (const message of change.value?.messages ?? []) {
-        if (message.from && typeof message.text?.body === 'string' && message.text.body.trim()) messages.push({ sender: message.from, text: message.text.body.trim() });
+        if (message.from && typeof message.text?.body === 'string' && message.text.body.trim()) messages.push({ sender: message.from, text: message.text.body.trim(), type: 'text' });
+        else if (message.from && message.type === 'audio') messages.push({ sender: message.from, text: '', type: 'audio' });
       }
     }
   }
@@ -60,6 +61,13 @@ export async function handleIncomingWebhook(req, res) {
       let reply;
       let paymentNotification = null;
       const adminControlCommand = /^(approve|reject|setplan|changeplan|pending|pendingpayments|payments)(?:\s|$)/i.test(message.text);
+      if (message.type === 'audio') {
+        reply = '🎙️ Thanks for the voice note! I cannot understand voice notes yet. Voice-message understanding is planned for a future upgrade. For now, please type your football question, for example: “What matches are on today?” or “Arsenal vs Chelsea, who might win?”';
+        await provider.sendMessage({ to: message.sender, text: reply });
+        try { await recordOutgoingMessage(message.sender); }
+        catch (usageError) { logger.warn({ error: usageError, phone: message.sender }, 'Could not record outgoing message usage'); }
+        continue;
+      }
       if (isPaymentAdmin(message.sender) && !adminControlCommand) {
         // Keep the personal admin number out of customer sports flows and quotas.
         reply = '🔐 This number is reserved for payment alerts and admin controls. Use the customer-facing bot number for sports features. Admin commands: PENDING, APPROVE REF, REJECT REF, SETPLAN REF DAY|WEEK|MONTH.';
