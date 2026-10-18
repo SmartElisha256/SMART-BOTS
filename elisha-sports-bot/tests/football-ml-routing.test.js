@@ -4,7 +4,7 @@ import { detectFootballIntent, formatMlPrediction } from '../src/services/footba
 
 test('football intent routes concepts and rules to AI alone', () => {
   assert.equal(detectFootballIntent('Explain the offside rule'), 'ai_only');
-  assert.equal(detectFootballIntent('What is xG in football?'), 'ml_ai');
+  assert.equal(detectFootballIntent('What is xG in football?'), 'ai_only');
   assert.equal(detectFootballIntent('Explain how a 4-3-3 formation works'), 'ai_only');
 });
 
