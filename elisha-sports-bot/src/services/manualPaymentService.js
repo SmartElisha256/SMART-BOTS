@@ -107,15 +107,15 @@ export async function listPendingPayments({ adminPhone, page = 1 }) {
     const amount = Number(payment.amount_ugx ?? payment.amountUgx ?? 0).toLocaleString('en-UG');
     const transactionId = String(payment.transaction_id ?? payment.transactionId ?? 'not recorded');
     const phone = String(payment.phone ?? 'unknown');
-    return '#' + payment.id + ' — ' + phone + '\\n' +
-      '   ' + key + ' (' + durationDays + 'd), expected UGX ' + amount + '\\n' +
-      '   Txn: ' + transactionId + '\\n' +
+    return '#' + payment.id + ' — ' + phone + '\n' +
+      '   ' + key + ' (' + durationDays + 'd), expected UGX ' + amount + '\n' +
+      '   Txn: ' + transactionId + '\n' +
       '   APPROVE ' + payment.id + ' | REJECT ' + payment.id;
   });
-  return '📋 PENDING PAYMENTS — ' + total + ' total\\nPage ' + safePage + '/' + pageCount +
-    '\\nVerify each transaction ID and exact amount in the merchant account before approval.\\n\\n' +
-    lines.join('\\n\\n') +
-    (pageCount > 1 ? '\\n\\nNext: PENDING ' + (safePage < pageCount ? safePage + 1 : 1) : '');
+  return '📋 PENDING PAYMENTS — ' + total + ' total\nPage ' + safePage + '/' + pageCount +
+    '\nVerify each transaction ID and exact amount in the merchant account before approval.\n\n' +
+    lines.join('\n\n') +
+    (pageCount > 1 ? '\n\nNext: PENDING ' + (safePage < pageCount ? safePage + 1 : 1) : '');
 }
 
 export async function setPaymentPlan({ adminPhone, paymentReference, planKey }) {
