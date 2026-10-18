@@ -8,12 +8,15 @@ const subscriptionSchema = z.object({
 });
 const inMemorySubscriptions = new Map();
 
+export function isSubscriptionActive(subscription, now = Date.now()) {
+  return Boolean(subscription && subscription.is_active !== false &&
+    (!subscription.expires_at || new Date(subscription.expires_at).getTime() > now));
+}
+
 export async function getUserSubscriptions(phone) {
   if (!pool) {
     const now = Date.now();
-    return (inMemorySubscriptions.get(phone) ?? []).filter((entry) =>
-      entry.is_active !== false && (!entry.expires_at || new Date(entry.expires_at).getTime() > now)
-    );
+    return (inMemorySubscriptions.get(phone) ?? []).filter((entry) => isSubscriptionActive(entry, now));
   }
   const result = await pool.query(
     'SELECT * FROM subscriptions WHERE phone = $1 AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())',
