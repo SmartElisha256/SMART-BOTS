@@ -65,6 +65,23 @@ export function interpretNaturalLanguage(input) {
     return { command: 'form', args: formMatch[1].trim(), raw: text };
   }
 
+  // Conversational football intents that do not use command syntax.
+  const normalizedQuestion = text.replace(/[?!,]+/g, ' ').replace(/\\s+/g, ' ').trim();
+  const h2hNatural = normalizedQuestion.match(/(?:show|get|give me|check|what is|tell me)? ?(?:the )?(?:h2h|head to head)(?: record| stats| history)? for (.+?) (?:vs|versus|against) (.+)$/);
+  if (h2hNatural && h2hNatural[1] && h2hNatural[2]) {
+    return { command: 'h2h', args: h2hNatural[1].trim() + ' vs ' + h2hNatural[2].trim(), raw: text };
+  }
+  const formNatural = normalizedQuestion.match(/^(?:how is|how's|how are|tell me about|show me the form of|form of|recent form for|recent results for) (.+?)(?: doing)?$/);
+  if (formNatural && formNatural[1] && !/^(the team|football|it)$/i.test(formNatural[1])) {
+    return { command: 'form', args: formNatural[1].trim(), raw: text };
+  }
+  if (/\\b(upgrade|premium plans?|pricing|subscribe|subscription)\\b/.test(text)) {
+    return { command: 'upgrade', args: null, raw: text };
+  }
+  if (/\\b(offsides?|corners?|cards?|shots on target|possession|lineups?|injuries|expected goals|xg|both teams to score|btts|double chance|correct score|tactics|transfer news)\\b/.test(text)) {
+    return { command: 'football_help', args: text, raw: text };
+  }
+
   const commandMatch = text.match(COMMAND_REGEX);
   if (commandMatch) {
     return { command: commandMatch[1], args: commandMatch[2] ? commandMatch[2].trim() : null, raw: text };
@@ -100,6 +117,12 @@ export async function processIncomingMessage(input) {
 
       case 'help':
         return getHelpMessage();
+
+      case 'upgrade':
+        return 'Reply UPGRADE to see Premium plans and payment instructions.';
+
+      case 'football_help':
+        return '⚽ I can help with fixtures, live scores, league tables, team form, head-to-head records, and available match analysis. Detailed corners, cards, player statistics, injuries, lineups, xG, and individual betting markets depend on connected data and may not be available yet. Tell me the teams or match you mean. I will not invent statistics or probabilities.';
 
       case 'fixtures':
         return await handleFixturesCommand(args);
@@ -185,6 +208,9 @@ Examples:
 
 “Today's tip”
   Checks available fixtures; it will not invent a pick if reliable data is unavailable.
+
+Voice notes
+  Voice-note understanding is planned for a future upgrade. Please type your football question for now.
 
 FIXTURES
   Shows next 3 upcoming matches.
