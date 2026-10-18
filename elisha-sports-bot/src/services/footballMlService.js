@@ -23,7 +23,7 @@ export function detectFootballIntent(input) {
   const conceptIntent = /\b(what is|what are|what does|define|meaning of|explain|teach me|how does|how do|rules of|difference between|why do|how to understand)\b/i.test(text);
   const conceptTerms = /\b(xg|expected goals|btts|double chance|offside|formation|football tactics|pressing|possession|counterattack|counter attack|4-3-3|4-2-3-1|false nine|high line|set pieces?|yellow cards?|red cards?|penalt(?:y|ies)|corner kicks?)\b/i.test(text);
   const matchSeparator = /\b(?:vs\.?|v\.?|versus|against)\b/i.test(text);
-  const explicitForecast = /\b(predict|prediction|forecast|who will win|who might win|who wins|chance of winning|chance of a draw|match analysis|analy[sz]e|compare these teams|compare the teams)\b/i.test(text);
+  const explicitForecast = /\b(predict|prediction|forecast|who will win|who might win|who wins|chance of winning|chance of a draw|match analysis|analy[sz]e|compare these teams|compare the teams|tips? today|today'?s? tips?)\b/i.test(text);
   const explicitData = /\b(live|right now|currently|latest|recent|last \d+|last five|last five games|form|head.to.head|h2h|standings|league table|table position|injur(?:y|ies)|squad news|team news|lineup|line-ups|starting eleven|shots|shots on target|possession stats|current score|live score|fixture|fixtures|upcoming match|historical record|recent results)\b/i.test(text);
   const hasTwoTeamShape = matchSeparator && text.split(/\b(?:vs\.?|v\.?|versus|against)\b/i).length >= 2;
   const marketTerms = /\b(1x2|double chance|over\s*\/?\s*under|btts|both teams to score|correct score|expected goals|xg|probabilit(?:y|ies)|goal markets?)\b/i.test(text);
@@ -45,6 +45,7 @@ export function detectFootballIntent(input) {
     return 'ml_ai';
   }
 
+  if (explicitForecast && !hasTwoTeamShape) return 'unknown';
   if (explicitData) return 'data_only';
   if (conceptIntent || conceptTerms || /\b(football|soccer|match|team|player|league|coach|manager|tournament|referee)\b/i.test(text)) {
     return 'ai_only';
