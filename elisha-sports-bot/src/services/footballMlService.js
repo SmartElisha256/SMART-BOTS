@@ -67,7 +67,7 @@ export async function predictFootballMatch({ homeTeam, awayTeam, kickoff = null 
       if (settled) return;
       let payload;
       try { payload = JSON.parse(stdout); }
-      catch { return finish(reject, new Error(stderr || 'Football ML returned invalid output.')); }
+      catch { return finish(reject, new Error('Python ML dependencies or trained model files are not available on the server.')); }
       if (code !== 0 || payload.error) {
         return finish(reject, new Error(payload.error || 'Football ML prediction failed.'));
       }
