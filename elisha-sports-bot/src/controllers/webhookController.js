@@ -25,7 +25,7 @@ function validSignature(req) {
   const expected = 'sha256=' + createHmac('sha256', env.WHATSAPP_APP_SECRET).update(req.rawBody).digest('hex');
   return safeEqualText(signature, expected);
 }
-async function notifyPaymentAdmins({ provider, sender, reference, transactionId, amount, durationDays }) {
+async function notifyPaymentAdmins({ provider, sender, reference, transactionId, amount, planLabel, durationDays }) {
   const admins = getAdminPhones();
   if (!admins.length) {
     logger.warn({ reference }, 'Payment transaction received but PAYMENT_ADMIN_PHONES is not configured');
@@ -33,8 +33,9 @@ async function notifyPaymentAdmins({ provider, sender, reference, transactionId,
   }
   const details = '💳 PREMIUM PAYMENT — TRANSACTION ID\nReference: ' + reference +
     '\nCustomer: ' + sender + '\nTransaction ID: ' + transactionId +
-    '\nExpected amount: UGX ' + Number(amount).toLocaleString('en-UG') +
-    '\nAccess duration: ' + durationDays + ' day(s)\n\nVerify this transaction in the merchant account before replying: APPROVE ' + reference +
+    '\nCustomer-selected plan: ' + planLabel +
+    '\nExpected amount (verify; not confirmed): UGX ' + Number(amount).toLocaleString('en-UG') +
+    '\nAccess duration if approved: ' + durationDays + ' day(s)\nStatus: PENDING — not yet verified\n\nVerify the transaction ID and exact amount in the merchant account before replying: APPROVE ' + reference +
     '\nTo decline it, reply: REJECT ' + reference;
   for (const admin of admins) {
     try { await provider.sendMessage({ to: admin, text: details }); }
@@ -66,7 +67,8 @@ export async function handleIncomingWebhook(req, res) {
           const planKey = tx?.[1]?.toLowerCase() || 'week';
           const price = planKey === 'day' ? env.PREMIUM_PRICE_DAY_UGX : planKey === 'month' ? env.PREMIUM_PRICE_MONTH_UGX : (env.PREMIUM_PRICE_WEEK_UGX ?? env.PREMIUM_PRICE_UGX);
           const durationDays = planKey === 'day' ? 1 : planKey === 'month' ? 30 : 7;
-          if (ref) paymentNotification = { reference: ref[1], transactionId: tx?.[2]?.trim(), amount: price, durationDays };
+          const planLabel = planKey === 'day' ? 'DAY (1 day)' : planKey === 'month' ? 'MONTH (30 days)' : 'WEEK (7 days)';
+          if (ref) paymentNotification = { reference: ref[1], transactionId: tx?.[2]?.trim(), amount: price, planLabel, durationDays };
         }
       } else {
         const quota = await checkAndConsumeDailyRequest(message.sender, message.text);
