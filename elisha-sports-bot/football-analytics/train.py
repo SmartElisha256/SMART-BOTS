@@ -1,4 +1,4 @@
-"""Train baseline models, evaluate a chronological holdout, and save artifacts."""
+"""Train baseline models, evaluate chronological holdout, and save artifacts."""
 from __future__ import annotations
 import argparse, json
 from pathlib import Path
@@ -20,22 +20,19 @@ def main():
     X = frame[list(FEATURES)].astype(float)
     y = frame["result"]
     split = max(15, int(len(frame) * 0.8))
-    if split >= len(frame):
-        split = len(frame) - 1
+    if split >= len(frame): split = len(frame) - 1
     encoder = LabelEncoder().fit(["A", "D", "H"])
-    classifier = RandomForestClassifier(n_estimators=160, min_samples_leaf=2, random_state=42, class_weight="balanced")
-    home_model = RandomForestRegressor(n_estimators=120, min_samples_leaf=2, random_state=42)
-    away_model = RandomForestRegressor(n_estimators=120, min_samples_leaf=2, random_state=43)
+    classifier = RandomForestClassifier(n_estimators=200, min_samples_leaf=3, random_state=42, class_weight="balanced")
+    home_model = RandomForestRegressor(n_estimators=160, min_samples_leaf=3, random_state=42)
+    away_model = RandomForestRegressor(n_estimators=160, min_samples_leaf=3, random_state=43)
     classifier.fit(X.iloc[:split], encoder.transform(y.iloc[:split]))
     home_model.fit(X.iloc[:split], frame["home_goals"].iloc[:split])
     away_model.fit(X.iloc[:split], frame["away_goals"].iloc[:split])
     holdout = X.iloc[split:]
-    result_metrics = {"holdout_matches": int(len(holdout)),
-                      "result_accuracy": float(accuracy_score(y.iloc[split:], encoder.inverse_transform(classifier.predict(holdout)))),
-                      "home_goals_mae": float(mean_absolute_error(frame["home_goals"].iloc[split:], home_model.predict(holdout))),
-                      "away_goals_mae": float(mean_absolute_error(frame["away_goals"].iloc[split:], away_model.predict(holdout)))}
-    # Production artifacts are refitted on all data. Their training cutoff is
-    # stored so they cannot be mistaken for leakage-free historical backtests.
+    metrics = {"holdout_matches": int(len(holdout)),
+               "result_accuracy": float(accuracy_score(y.iloc[split:], encoder.inverse_transform(classifier.predict(holdout)))),
+               "home_goals_mae": float(mean_absolute_error(frame["home_goals"].iloc[split:], home_model.predict(holdout))),
+               "away_goals_mae": float(mean_absolute_error(frame["away_goals"].iloc[split:], away_model.predict(holdout)))}
     classifier.fit(X, encoder.transform(y))
     home_model.fit(X, frame["home_goals"])
     away_model.fit(X, frame["away_goals"])
@@ -44,13 +41,12 @@ def main():
     synthetic_data = bool("source" in raw and (raw["source"] == "synthetic").all())
     joblib.dump({"model": classifier, "encoder": encoder, "features": list(FEATURES),
                  "trained_until": trained_until, "synthetic_data": synthetic_data,
-                 "data_path": str(Path(args.data))}, out / "result.joblib")
+                 "data_path": str(Path(args.data)), "feature_version": "rolling-stats-v4"}, out / "result.joblib")
     joblib.dump(home_model, out / "home_goals.joblib")
     joblib.dump(away_model, out / "away_goals.joblib")
-    (out / "evaluation.json").write_text(json.dumps(result_metrics, indent=2) + "\n")
+    (out / "evaluation.json").write_text(json.dumps(metrics, indent=2) + "\n")
     print(json.dumps({"trained_matches": len(frame), "synthetic_data": synthetic_data,
                       "data_path": str(Path(args.data)), "trained_until": trained_until,
-                      "evaluation": result_metrics}, indent=2))
+                      "feature_count": len(FEATURES), "features": list(FEATURES), "evaluation": metrics}, indent=2))
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()

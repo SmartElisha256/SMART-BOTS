@@ -137,3 +137,22 @@ def test_goal_line_probabilities_are_complementary(tmp_path):
     for line in ("0_5", "1_5", "2_5", "3_5"):
         assert result["goal_markets"][f"over_{line}"] + result["goal_markets"][f"under_{line}"] == pytest.approx(1.0)
     assert result["data_quality"]["status"] in {"synthetic", "limited", "unvalidated"}
+
+
+def test_optional_match_statistics_are_used_only_from_prior_matches():
+    rows = pd.DataFrame([
+        {"match_date": "2025-01-01T00:00:00Z", "home_team": "Arsenal", "away_team": "Chelsea",
+         "home_goals": 2, "away_goals": 0, "home_shots": 14, "away_shots": 7,
+         "home_shots_on_target": 6, "away_shots_on_target": 2, "home_corners": 8, "away_corners": 3},
+        {"match_date": "2025-01-02T00:00:00Z", "home_team": "Arsenal", "away_team": "Liverpool",
+         "home_goals": 1, "away_goals": 1, "home_shots": 9, "away_shots": 10,
+         "home_shots_on_target": 3, "away_shots_on_target": 4, "home_corners": 5, "away_corners": 6},
+    ])
+    rows["match_date"] = pd.to_datetime(rows["match_date"], utc=True)
+    frame = build_training_frame(rows)
+    assert frame.iloc[0]["home_shots_avg"] == 0
+    assert frame.iloc[0]["home_shots_coverage"] == 0
+    assert frame.iloc[1]["home_shots_avg"] == pytest.approx(14.0)
+    assert frame.iloc[1]["home_shots_coverage"] == 1
+    assert frame.iloc[1]["home_shots_on_target_avg"] == pytest.approx(6.0)
+    assert frame.iloc[1]["home_days_rest"] == pytest.approx(1.0)
