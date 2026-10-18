@@ -67,7 +67,7 @@ test('natural language recognizes conversational head-to-head questions', () => 
 
 test('natural language directs unsupported detailed football markets honestly', () => {
   assert.equal(parseCommand('Can you tell me the corners and cards prediction?').command, 'football_help');
-  assert.equal(parseCommand('How much is premium?').command, 'upgrade');
+  assert.equal(parseCommand('What are the Premium plans?').command, 'upgrade');
 });
 
 
