@@ -17,7 +17,7 @@ const commandRequestSchema = z.object({
 const COMMAND_REGEX = /^([a-z0-9]+)(?:\s+(.+))?$/i;
 
 const BETTING_DISCLAIMER = 'Disclaimer: This statistical analysis is intended for adults aged 18 and above. Gambling can be psychologically harmful and can lead to financial loss. Tips are derived from statistical analysis, not certainty. Use any tips responsibly and stake only what you can afford to lose.';
-function appendBettingDisclaimer(message) { return `${message}\\n\\n${BETTING_DISCLAIMER}`; }
+function appendBettingDisclaimer(message) { return `${message}\n\n${BETTING_DISCLAIMER}`; }
 
 /**
  * Translate common conversational messages into the bot's existing commands.
