@@ -15,10 +15,10 @@ export function detectFootballIntent(input) {
   if (conceptQuestion.test(text) && !/\b(?:vs?\.?|versus|against|predict|prediction|probabilit|today'?s? tip|betting|odds)\b/i.test(text)) return 'ai_only';
 
   const predictionIntent = /\b(predict|prediction|predicting|who will win|who might win|who wins|best pick|tips? today|today'?s? tips?|betting|odds|1x2|double chance|over\s*\/?\s*under|btts|both teams to score|correct score|expected goals|xg|probabilit(?:y|ies)|chance of (?:winning|a draw)|match analysis|analy[sz]e .{1,80}\b(?:vs?\.?|versus|against)\b)\b/i;
-  const matchup = /\\b.{2,60}\\s+(?:vs?\\.?|versus|against)\\s+.{2,60}\\b/i;
+  const matchup = /\b.{2,60}\s+(?:vs?\.?|versus|against)\s+.{2,60}\b/i;
   if (predictionIntent.test(text) || matchup.test(text)) return 'ml_ai';
 
-  const conceptIntent = /\\b(what is|explain|define|how does|how do|teach me|rules of|meaning of|formation|tactics|offside|penalty rule|referee|football history|what does .{1,30} mean)\\b/i;
+  const conceptIntent = /\b(what is|explain|define|how does|how do|teach me|rules of|meaning of|formation|tactics|offside|penalty rule|referee|football history|what does .{1,30} mean)\b/i;
   if (conceptIntent.test(text)) return 'ai_only';
   return 'ai_only';
 }
@@ -107,5 +107,5 @@ export function formatMlPrediction(prediction) {
   ];
   if (warnings.length) lines.push('', `Data warnings: ${warnings.join(' ')}`);
   lines.push('', 'These are model estimates, not guarantees. Do not treat them as certain outcomes.');
-  return lines.join('\\n');
+  return lines.join('\n');
 }
