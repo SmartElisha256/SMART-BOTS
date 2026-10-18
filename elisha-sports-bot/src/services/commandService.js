@@ -290,7 +290,7 @@ async function handleTipCommand() {
     return `⚽ TODAY’S TIP — FIXTURE CHECK\n\n${demo ? '⚠️ DEMO DATA — these are not verified live fixtures, so no pick or probability is provided.\n\n' : ''}${list}\n\nReply “ANALYZE Team A vs Team B” with a match you want assessed. Detailed analysis may require Premium.\n\nAny analysis is uncertain and is not a guarantee of a result.`;
   } catch (error) {
     logger.error({ error }, 'Error checking fixtures for tip request');
-    return 'I could not check fixtures for a tip right now. Please try again later. I will not make up a pick or probability.';
+    return appendBettingDisclaimer('I could not check fixtures for a tip right now. Please try again later. I will not make up a pick or probability.');
   }
 }
 
@@ -428,10 +428,11 @@ async function handleAnalyzeCommand(args) {
       getHeadToHeadRecord(teamA, teamB),
       getMatchContext(teamA, teamB).catch((error) => ({ dataQuality: { status: 'partial', warnings: [error.message] } }))
     ]);
-    return await analyzeMatch({ teamA, teamB, formA, formB, h2h, matchContext: context ? formatMatchContext(context) : null });
+    const analysis = await analyzeMatch({ teamA, teamB, formA, formB, h2h, matchContext: context ? formatMatchContext(context) : null });
+    return appendBettingDisclaimer(analysis);
   } catch (error) {
     logger.error({ error, teamA, teamB }, 'Error analyzing match');
-    return 'I could not analyze that match because the sports data service failed. Please try again later.';
+    return appendBettingDisclaimer('I could not analyze that match because the sports data service failed. Please try again later.');
   }
 }
 
