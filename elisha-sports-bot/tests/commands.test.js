@@ -45,3 +45,27 @@ test('natural language maps conversational match questions to analysis', () => {
     command: 'h2h', args: 'manchester city vs liverpool', raw: 'please show h2h manchester city vs liverpool'
   });
 });
+
+
+test('natural language handles alternate match-analysis wording and punctuation', () => {
+  assert.deepEqual(parseCommand('Arsenal vs Chelsea, who might win?'), {
+    command: 'analyze', args: 'arsenal vs chelsea', raw: 'arsenal vs chelsea, who might win'
+  });
+  assert.deepEqual(parseCommand('Please analyze Barcelona against Real Madrid'), {
+    command: 'analyze', args: 'barcelona vs real madrid', raw: 'please analyze barcelona against real madrid'
+  });
+});
+
+test('natural language recognizes conversational head-to-head questions', () => {
+  assert.deepEqual(parseCommand('Please show H2H Manchester City vs Liverpool'), {
+    command: 'h2h', args: 'manchester city vs liverpool', raw: 'please show h2h manchester city vs liverpool'
+  });
+  assert.deepEqual(parseCommand('What is the head to head for Arsenal versus Chelsea?'), {
+    command: 'h2h', args: 'arsenal vs chelsea', raw: 'what is the head to head for arsenal versus chelsea'
+  });
+});
+
+test('natural language directs unsupported detailed football markets honestly', () => {
+  assert.equal(parseCommand('Can you tell me the corners and cards prediction?').command, 'football_help');
+  assert.equal(parseCommand('How much is premium?').command, 'upgrade');
+});
