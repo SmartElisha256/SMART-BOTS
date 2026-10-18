@@ -8,7 +8,34 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const analyticsDir = path.resolve(here, '../../football-analytics');
 const pythonBin = process.env.PYTHON_BIN || 'python3';
 
+function authorizePredictionRequest(req, res) {
+  // This route can trigger CPU-intensive Python work. In production, require
+  // a dedicated secret so the endpoint cannot be used as an unauthenticated
+  // public prediction service. Internal app calls should send x-api-key.
+  if (process.env.NODE_ENV !== 'production') return true;
+
+  const expected = process.env.FOOTBALL_ML_API_KEY?.trim();
+  if (!expected) {
+    res.status(503).json({
+      ok: false,
+      error: 'Football ML API is disabled until FOOTBALL_ML_API_KEY is configured.'
+    });
+    return false;
+  }
+
+  const authorization = req.get('authorization') || '';
+  const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+  const supplied = req.get('x-api-key') || bearer;
+  if (!supplied || supplied !== expected) {
+    res.status(401).json({ ok: false, error: 'Unauthorized.' });
+    return false;
+  }
+  return true;
+}
+
 router.post('/predict', (req, res) => {
+  if (!authorizePredictionRequest(req, res)) return;
+
   const { home_team: home, away_team: away, kickoff } = req.body ?? {};
   if (typeof home !== 'string' || !home.trim() || home.trim().length > 80 ||
       typeof away !== 'string' || !away.trim() || away.trim().length > 80 ||
@@ -37,7 +64,17 @@ router.post('/predict', (req, res) => {
   }, 15000);
   child.stdout.setEncoding('utf8');
   child.stderr.setEncoding('utf8');
-  child.stdout.on('data', (chunk) => { stdout += chunk; if (stdout.length > 1_000_000) child.kill('SIGKILL'); });
+  child.stdout.on('data', (chunk) => {
+    if (finished) return;
+    stdout += chunk;
+    if (stdout.length > 1_000_000) {
+      finished = true;
+      clearTimeout(timeout);
+      child.kill('SIGKILL');
+      res.status(502).json({ ok: false, error: 'Prediction output exceeded the allowed size.' });
+    }
+  });
+  child.stderr.setEncoding('utf8');
   child.stderr.on('data', (chunk) => { stderr += chunk.slice(0, 4000); });
   child.on('error', (error) => {
     if (finished) return;
