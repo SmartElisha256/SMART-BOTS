@@ -129,7 +129,9 @@ export async function processIncomingMessage(input) {
     );
 
     if (!command) {
-      return `I’m not sure what you mean yet. You can ask naturally, for example:\n• “What matches are on today?”\n• “How is Arsenal doing?”\n• “Arsenal vs Chelsea, who might win?”\n• “Today's tip”\n\nReply MENU to see everything I can do.`;
+      const aiReply = await getFootballAssistantReply(raw);
+      if (aiReply) return aiReply;
+      return getFriendlyFallback();
     }
 
     switch (command) {
