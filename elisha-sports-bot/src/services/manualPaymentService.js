@@ -44,9 +44,60 @@ export function formatPaymentInstructions() {
     'Access stays pending until the administrator confirms the transaction in the merchant account. Never share your Mobile Money PIN or OTP.';
 }
 
-export async function submitPaymentProof({ phone, transactionId, planKey = 'week' }) {
-  const plan = PREMIUM_PLANS[String(planKey ?? 'week').toLowerCase()];
-  if (!validPlan(plan)) return 'Choose a valid plan: PAY DAY TRANSACTION_ID, PAY WEEK TRANSACTION_ID, or PAY MONTH TRANSACTION_ID.';
+function planKeyForDuration(durationDays) {
+  return Number(durationDays) === 1 ? 'day' : Number(durationDays) === 30 ? 'month' : 'week';
+}
+
+export async function getPaymentRequestByReference(paymentReference) {
+  const ref = Number(paymentReference);
+  if (!Number.isSafeInteger(ref) || ref < 1) return null;
+  if (pool) {
+    const result = await pool.query(
+      'SELECT id, phone, transaction_id, amount_ugx, plan_duration_days, status FROM manual_payment_requests WHERE id = $1',
+      [ref]
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    const key = planKeyForDuration(row.plan_duration_days);
+    return {
+      id: Number(row.id), phone: row.phone, transactionId: row.transaction_id,
+      amountUgx: Number(row.amount_ugx), durationDays: Number(row.plan_duration_days),
+      planKey: key, planLabel: PREMIUM_PLANS[key].label, status: row.status
+    };
+  }
+  const payment = memoryPayments.get(ref);
+  if (!payment) return null;
+  const key = planKeyForDuration(payment.durationDays);
+  return { ...payment, amountUgx: Number(payment.amountUgx ?? payment.amount_ugx), durationDays: Number(payment.durationDays ?? payment.plan_duration_days), planKey: key, planLabel: PREMIUM_PLANS[key].label };
+}
+
+export async function setPaymentPlan({ adminPhone, paymentReference, planKey }) {
+  if (!isPaymentAdmin(adminPhone)) return '⛔ You are not authorized to change payment plans.';
+  const ref = Number(paymentReference);
+  const key = String(planKey ?? '').toLowerCase();
+  const plan = PREMIUM_PLANS[key];
+  if (!Number.isSafeInteger(ref) || ref < 1 || !validPlan(plan)) {
+    return 'Admin usage: SETPLAN PAYMENT_REFERENCE DAY|WEEK|MONTH';
+  }
+  if (pool) {
+    const result = await pool.query(
+      "UPDATE manual_payment_requests SET amount_ugx = $2, plan_duration_days = $3 WHERE id = $1 AND status = 'pending' AND transaction_id IS NOT NULL RETURNING id, phone, amount_ugx, plan_duration_days",
+      [ref, plan.price, plan.durationDays]
+    );
+    if (!result.rows[0]) return 'No pending transaction-ID payment found for that reference. Approved or rejected payments cannot be changed.';
+    return '✅ Payment reference ' + ref + ' updated to ' + key.toUpperCase() + ' (' + plan.durationDays + ' day(s)). Expected amount is now UGX ' + plan.price.toLocaleString('en-UG') + '. Verify the actual amount paid in the merchant account before approving.';
+  }
+  const payment = memoryPayments.get(ref);
+  if (!payment || payment.status !== 'pending') return 'No pending transaction-ID payment found for that reference. Approved or rejected payments cannot be changed.';
+  payment.amountUgx = plan.price;
+  payment.durationDays = plan.durationDays;
+  payment.planLabel = plan.label;
+  return '✅ Payment reference ' + ref + ' updated to ' + key.toUpperCase() + ' (' + plan.durationDays + ' day(s)). Expected amount is now UGX ' + plan.price.toLocaleString('en-UG') + '. Verify the actual amount paid in the merchant account before approving.';
+}
+
+export async function submitPaymentProof({ phone, transactionId, planKey }) {
+  const plan = PREMIUM_PLANS[String(planKey ?? '').toLowerCase()];
+  if (!validPlan(plan)) return 'Choose a plan explicitly: PAY DAY TRANSACTION_ID, PAY WEEK TRANSACTION_ID, or PAY MONTH TRANSACTION_ID. No plan is assumed.';
   const id = String(transactionId ?? '').trim().replace(/\s+/g, '');
   if (!/^[A-Za-z0-9-]{6,80}$/.test(id)) return 'Send the transaction ID from your successful receipt. Example: PAY WEEK ABC123XYZ. Never send your PIN or OTP.';
 
@@ -56,9 +107,9 @@ export async function submitPaymentProof({ phone, transactionId, planKey = 'week
       [phone, id, plan.price, env.MOMO_NETWORK || 'not-configured', plan.durationDays]
     );
     if (!result.rows[0]) {
-      const existing = await pool.query('SELECT phone, status, id FROM manual_payment_requests WHERE transaction_id = $1', [id]);
+      const existing = await pool.query('SELECT phone, status, id, amount_ugx, plan_duration_days FROM manual_payment_requests WHERE transaction_id = $1', [id]);
       if (existing.rows[0]?.phone !== phone) return 'That transaction ID has already been submitted. Contact the administrator if needed.';
-      return 'Transaction ID already received. Reference: ' + existing.rows[0].id + '. Status: ' + existing.rows[0].status + '.';
+      const saved = existing.rows[0];\n      const savedKey = planKeyForDuration(saved.plan_duration_days);\n      return 'Transaction ID already received. Reference: ' + saved.id + '. Saved plan: ' + savedKey.toUpperCase() + ' (' + saved.plan_duration_days + ' day(s)), expected UGX ' + Number(saved.amount_ugx).toLocaleString('en-UG') + '. Status: ' + saved.status + '.';
     }
     return '✅ Transaction ID received. Reference: ' + result.rows[0].id + '\nSelected plan: ' + plan.label + ' — UGX ' + plan.price.toLocaleString('en-UG') + '\nStatus: PENDING VERIFICATION. Access is not active yet.';
   }
@@ -139,6 +190,11 @@ export async function handlePaymentCommand({ phone, message }) {
     const planKey = ['day', 'week', 'month'].includes(first) ? first : 'week';
     const transactionId = ['day', 'week', 'month'].includes(first) ? parts.slice(1).join(' ') : args;
     return submitPaymentProof({ phone, transactionId, planKey });
+  }
+  if (/^(setplan|changeplan)$/i.test(command)) {
+    const match = args.match(/^(?:payment\\s+)?(\\d+)\\s+(day|week|month)$/i);
+    if (!match) return 'Admin usage: SETPLAN PAYMENT_REFERENCE DAY|WEEK|MONTH';
+    return setPaymentPlan({ adminPhone: phone, paymentReference: match[1], planKey: match[2] });
   }
   if (/^approve$/i.test(command)) {
     const match = args.match(/^(?:payment\s+)?(\d+)$/i);
