@@ -76,3 +76,11 @@ test('pending payment queue is admin-only and groups requests by page', async ()
   assert.match(queue, /APPROVE/);
 });
 
+test('PENDING accepts numeric page numbers and rejects invalid page input', async () => {
+  const invalid = await handlePaymentCommand({ phone: '256700000001', message: 'PENDING abc' });
+  assert.equal(invalid, 'Usage: PENDING [PAGE_NUMBER]');
+
+  const secondPage = await handlePaymentCommand({ phone: '256700000001', message: 'PENDING 2' });
+  assert.doesNotMatch(secondPage, /^Usage: PENDING/);
+  assert.match(secondPage, /does not exist|PENDING PAYMENTS/);
+});
