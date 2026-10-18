@@ -53,7 +53,7 @@ export function interpretNaturalLanguage(input) {
   const pair = matchup || ((/\b(who will win|who might win|who wins|predict|prediction|analy[sz]e|analysis|h2h|head to head|tip)\b/.test(text)) ? plainMatchup : null);
   if (pair) {
     const teamA = (pair[1] ?? '').trim();
-    const teamB = (pair[2] ?? '').trim();
+    const teamB = (pair[2] ?? '').trim().replace(/[, ]+$/g, '');
     if (teamA && teamB) {
       const command = /\b(h2h|head to head)\b/.test(text) ? 'h2h' : 'analyze';
       return { command, args: `${teamA} vs ${teamB}`, raw: text };
