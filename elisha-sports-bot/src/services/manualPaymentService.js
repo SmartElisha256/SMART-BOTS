@@ -244,7 +244,7 @@ export async function handlePaymentCommand({ phone, message }) {
   }
   if (/^(pending|pendingpayments|payments)$/i.test(command)) {
     const requestedPage = args ? Number(args) : 1;
-    if (args && (!/^\\d+$/.test(args) || !Number.isSafeInteger(requestedPage) || requestedPage < 1)) {
+    if (args && (!/^\d+$/.test(args) || !Number.isSafeInteger(requestedPage) || requestedPage < 1)) {
       return 'Usage: PENDING [PAGE_NUMBER]';
     }
     return listPendingPayments({ adminPhone: phone, page: requestedPage });
