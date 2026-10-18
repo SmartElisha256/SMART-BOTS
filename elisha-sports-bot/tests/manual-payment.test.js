@@ -50,12 +50,12 @@ test('PAY supports day and month plans', async () => {
 
 test('only admin can correct a pending payment plan', async () => {
   const submitted = await handlePaymentCommand({ phone: '256700000020', message: 'PAY WEEK PLANFIX12345' });
-  const reference = submitted.match(/Reference: (\\d+)/)?.[1];
+  const reference = submitted.match(/Reference: (\d+)/)?.[1];
   assert.ok(reference, submitted);
   const denied = await handlePaymentCommand({ phone: '256700000020', message: 'SETPLAN ' + reference + ' DAY' });
   assert.equal(denied, '⛔ You are not authorized to change payment plans.');
   const corrected = await handlePaymentCommand({ phone: '256700000001', message: 'SETPLAN ' + reference + ' DAY' });
-  assert.match(corrected, /updated to DAY \\(1 day\\)/);
+  assert.match(corrected, /updated to DAY \(1 day\)/);
   assert.match(corrected, /UGX 1,000/);
   const duplicate = await handlePaymentCommand({ phone: '256700000020', message: 'PAY WEEK PLANFIX12345' });
   assert.match(duplicate, /Saved plan: DAY/);
