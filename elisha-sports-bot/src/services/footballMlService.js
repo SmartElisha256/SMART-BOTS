@@ -38,6 +38,9 @@ export function detectFootballIntent(input) {
     return 'data_ml_ai';
   }
 
+  // Market labels without a named match are underspecified; do not launch a model.
+  if (marketTerms && !hasTwoTeamShape && !explicitForecast) return 'unknown';
+
   if (hasTwoTeamShape || (explicitForecast && (marketTerms || /\bmatch|team|teams|football|soccer\b/i.test(text)))) {
     return 'ml_ai';
   }
