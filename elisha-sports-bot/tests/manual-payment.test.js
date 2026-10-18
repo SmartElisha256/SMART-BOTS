@@ -12,11 +12,11 @@ process.env.MOMO_MERCHANT_CODE = '6949337';
 process.env.MOMO_MERCHANT_NAME = 'SMART ELISHA 256';
 process.env.PAYMENT_ADMIN_PHONES = '256700000001';
 
-const { formatPaymentInstructions, handlePaymentCommand, isPaymentAdmin, isPaymentCommand, PREMIUM_PLANS } =
+const { formatPaymentInstructions, handlePaymentCommand, isPaymentAdmin, isPaymentCommand, listPendingPayments, PREMIUM_PLANS } =
   await import('../src/services/manualPaymentService.js');
 
 test('recognizes payment/admin commands but not football commands', () => {
-  for (const text of ['PREMIUM', 'UPGRADE', 'PAY ABC123XYZ', 'PAY DAY ABC123XYZ', 'PAY WEEK ABC123XYZ', 'PAY MONTH ABC123XYZ', 'APPROVE 12', 'REJECT 12', 'SETPLAN 12 DAY', 'CHANGEPLAN 12 MONTH']) assert.equal(isPaymentCommand(text), true, text);
+  for (const text of ['PREMIUM', 'UPGRADE', 'PAY ABC123XYZ', 'PAY DAY ABC123XYZ', 'PAY WEEK ABC123XYZ', 'PAY MONTH ABC123XYZ', 'APPROVE 12', 'REJECT 12', 'SETPLAN 12 DAY', 'CHANGEPLAN 12 MONTH', 'PENDING', 'PENDING 2', 'PENDINGPAYMENTS', 'PAYMENTS']) assert.equal(isPaymentCommand(text), true, text);
   assert.equal(isPaymentCommand('FIXTURES'), false);
   assert.equal(isPaymentCommand('HELP'), false);
 });
@@ -59,4 +59,28 @@ test('only admin can correct a pending payment plan', async () => {
   assert.match(corrected, /UGX 1,000/);
   const duplicate = await handlePaymentCommand({ phone: '256700000020', message: 'PAY WEEK PLANFIX12345' });
   assert.match(duplicate, /Saved plan: DAY/);
+});
+
+test('pending payment queue is admin-only and groups requests by page', async () => {
+  const submitted = await handlePaymentCommand({ phone: '256700000030', message: 'PAY WEEK QUEUETEST12345' });
+  const reference = submitted.match(/Reference: (\d+)/)?.[1];
+  assert.ok(reference, submitted);
+
+  const denied = await handlePaymentCommand({ phone: '256700000030', message: 'PENDING' });
+  assert.equal(denied, '⛔ You are not authorized to view pending payments.');
+
+  const queue = await handlePaymentCommand({ phone: '256700000001', message: 'PENDING' });
+  assert.match(queue, /PENDING PAYMENTS/);
+  assert.ok(queue.includes('#' + reference), queue);
+  assert.match(queue, /QUEUETEST12345/);
+  assert.match(queue, /APPROVE/);
+});
+
+test('PENDING accepts numeric page numbers and rejects invalid page input', async () => {
+  const invalid = await handlePaymentCommand({ phone: '256700000001', message: 'PENDING abc' });
+  assert.equal(invalid, 'Usage: PENDING [PAGE_NUMBER]');
+
+  const secondPage = await handlePaymentCommand({ phone: '256700000001', message: 'PENDING 2' });
+  assert.doesNotMatch(secondPage, /^Usage: PENDING/);
+  assert.match(secondPage, /does not exist|PENDING PAYMENTS/);
 });
