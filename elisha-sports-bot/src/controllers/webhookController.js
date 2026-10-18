@@ -36,7 +36,7 @@ async function notifyPaymentAdmins({ provider, sender, reference, transactionId,
     '\nCustomer-selected plan: ' + planLabel +
     '\nExpected amount (verify; not confirmed): UGX ' + Number(amount).toLocaleString('en-UG') +
     '\nAccess duration if approved: ' + durationDays + ' day(s)\nStatus: PENDING — not yet verified\n\nVerify the transaction ID and exact amount in the merchant account before replying: APPROVE ' + reference +
-    '\nTo decline it, reply: REJECT ' + reference;
+    '\nTo decline it, reply: REJECT ' + reference + '\nFor the grouped queue, reply: PENDING.';
   for (const admin of admins) {
     try { await provider.sendMessage({ to: admin, text: details }); }
     catch (error) { logger.error({ error, admin, reference }, 'Could not notify payment administrator'); }
