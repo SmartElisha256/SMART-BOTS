@@ -7,6 +7,7 @@ import { formatSeasonReport } from './historicalSeasonService.js';
 import { analyzeMatch } from './analysisService.js';
 import { getMatchContext, formatMatchContext } from './fixtureContextService.js';
 import { logger } from '../utils/logger.js';
+import { claimPremiumTrialRequest } from './premiumTrialService.js';
 
 const commandRequestSchema = z.object({
   sender: z.string().min(5),
@@ -72,9 +73,17 @@ export async function processIncomingMessage(input) {
         return await handleH2HCommand(args);
 
       case 'analyze':
-      case 'analysis':
-        if (!(await hasActivePremiumSubscription(sender))) return premiumRequiredMessage();
-        return await handleAnalyzeCommand(args);
+      case 'analysis': {
+        if (await hasActivePremiumSubscription(sender)) return await handleAnalyzeCommand(args);
+        if (!args || !/\\s+vs?\\s+/i.test(args)) return await handleAnalyzeCommand(args);
+        const trial = await claimPremiumTrialRequest(sender);
+        if (!trial.allowed) return premiumRequiredMessage(trial.reason);
+        const analysis = await handleAnalyzeCommand(args);
+        const remainingText = trial.remaining > 0
+          ? `You have ${trial.remaining} trial analysis request(s) remaining.`
+          : 'You have used all your trial analyses. Upgrade to keep using detailed analysis.';
+        return `🆓 NEW USER PREMIUM TRIAL\\nYou are using one of your first-day Premium match analyses. ${remainingText}\\n\\n${analysis}`;
+      }
 
       case 'season':
       case 'historical':
