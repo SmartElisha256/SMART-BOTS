@@ -87,7 +87,7 @@ export function interpretNaturalLanguage(input) {
   if (/\b(upgrade|premium plans?|pricing|subscribe|subscription)\b/.test(text)) {
     return { command: 'upgrade', args: null, raw: text };
   }
-  if (/\b(offsides?|corners?|cards?|shots on target|possession|lineups?|injuries|expected goals|xg|both teams to score|btts|double chance|correct score|tactics|transfer news)\b/.test(text)) {
+  if (/\b(football|soccer|match|matches|team|teams|player|players|league|leagues|goal|goals|score|scores|win|draw|lose|lost|won|coach|manager|transfer|tournament|formation|referee|penalt(?:y|ies)|offsides?|corners?|cards?|shots on target|possession|lineups?|injuries|expected goals|xg|both teams to score|btts|double chance|correct score|tactics|transfer news|premier league|champions league)\b/.test(text)) {
     return { command: 'football_help', args: text, raw: text };
   }
 
