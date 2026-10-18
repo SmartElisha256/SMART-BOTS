@@ -1,5 +1,5 @@
 import { createApp } from './app.js';
-import { env } from './config/env.js';
+import { env, validateEnvironment } from './config/env.js';
 import pool, { testDatabaseConnection } from './database/pool.js';
 import { logger } from './utils/logger.js';
 
@@ -29,6 +29,10 @@ async function verifyPersistentStorage() {
 }
 
 async function startServer() {
+  // Throws when production placeholders remain (WhatsApp tokens, merchant code, admin phones).
+  const status = validateEnvironment();
+  logger.info({ environment: status.environment, messagingProvider: status.messagingProvider }, 'Environment validated');
+
   if (env.NODE_ENV === 'production') {
     await verifyPersistentStorage();
     logger.info('Persistent subscription and payment storage verified');
