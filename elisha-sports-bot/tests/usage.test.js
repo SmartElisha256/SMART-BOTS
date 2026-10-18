@@ -11,14 +11,14 @@ import {
   claimQuotaNotice
 } from '../src/services/usageService.js';
 
-test('tracks football-data commands but not help or preference commands', () => {
+test('tracks football-data and natural-language requests but not help or preference commands', () => {
   assert.equal(isQuotaTrackedMessage('FIXTURES'), true);
   assert.equal(isQuotaTrackedMessage('ANALYZE Arsenal vs Chelsea'), true);
   assert.equal(isQuotaTrackedMessage('SEASON Premier League 2024'), true);
   assert.equal(isQuotaTrackedMessage('MENU'), false);
   assert.equal(isQuotaTrackedMessage('HELP'), false);
   assert.equal(isQuotaTrackedMessage('START'), false);
-  assert.equal(isQuotaTrackedMessage('something-unknown'), false);
+  assert.equal(isQuotaTrackedMessage('something-unknown'), true);\n  assert.equal(isQuotaTrackedMessage('Explain the offside rule'), true);\n  assert.equal(isQuotaTrackedMessage('hello'), false);
 });
 
 test('extracts a command name from a message', () => {
