@@ -18,7 +18,9 @@ test('tracks football-data and natural-language requests but not help or prefere
   assert.equal(isQuotaTrackedMessage('MENU'), false);
   assert.equal(isQuotaTrackedMessage('HELP'), false);
   assert.equal(isQuotaTrackedMessage('START'), false);
-  assert.equal(isQuotaTrackedMessage('something-unknown'), true);\n  assert.equal(isQuotaTrackedMessage('Explain the offside rule'), true);\n  assert.equal(isQuotaTrackedMessage('hello'), false);
+  assert.equal(isQuotaTrackedMessage('something-unknown'), true);
+  assert.equal(isQuotaTrackedMessage('Explain the offside rule'), true);
+  assert.equal(isQuotaTrackedMessage('hello'), false);
 });
 
 test('extracts a command name from a message', () => {
