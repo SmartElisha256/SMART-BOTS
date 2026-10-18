@@ -109,7 +109,9 @@ export async function submitPaymentProof({ phone, transactionId, planKey }) {
     if (!result.rows[0]) {
       const existing = await pool.query('SELECT phone, status, id, amount_ugx, plan_duration_days FROM manual_payment_requests WHERE transaction_id = $1', [id]);
       if (existing.rows[0]?.phone !== phone) return 'That transaction ID has already been submitted. Contact the administrator if needed.';
-      const saved = existing.rows[0];\n      const savedKey = planKeyForDuration(saved.plan_duration_days);\n      return 'Transaction ID already received. Reference: ' + saved.id + '. Saved plan: ' + savedKey.toUpperCase() + ' (' + saved.plan_duration_days + ' day(s)), expected UGX ' + Number(saved.amount_ugx).toLocaleString('en-UG') + '. Status: ' + saved.status + '.';
+      const saved = existing.rows[0];
+      const savedKey = planKeyForDuration(saved.plan_duration_days);
+      return 'Transaction ID already received. Reference: ' + saved.id + '. Saved plan: ' + savedKey.toUpperCase() + ' (' + saved.plan_duration_days + ' day(s)), expected UGX ' + Number(saved.amount_ugx).toLocaleString('en-UG') + '. Status: ' + saved.status + '.';
     }
     return '✅ Transaction ID received. Reference: ' + result.rows[0].id + '\nSelected plan: ' + plan.label + ' — UGX ' + plan.price.toLocaleString('en-UG') + '\nStatus: PENDING VERIFICATION. Access is not active yet.';
   }
@@ -194,7 +196,7 @@ export async function handlePaymentCommand({ phone, message }) {
     return submitPaymentProof({ phone, transactionId, planKey });
   }
   if (/^(setplan|changeplan)$/i.test(command)) {
-    const match = args.match(/^(?:payment\\s+)?(\\d+)\\s+(day|week|month)$/i);
+    const match = args.match(/^(?:payment\s+)?(\d+)\s+(day|week|month)$/i);
     if (!match) return 'Admin usage: SETPLAN PAYMENT_REFERENCE DAY|WEEK|MONTH';
     return setPaymentPlan({ adminPhone: phone, paymentReference: match[1], planKey: match[2] });
   }
