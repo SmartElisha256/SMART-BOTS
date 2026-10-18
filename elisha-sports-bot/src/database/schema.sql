@@ -63,3 +63,13 @@ ALTER TABLE manual_payment_requests DROP COLUMN IF EXISTS screenshot_media_id;
 CREATE INDEX IF NOT EXISTS idx_manual_payment_requests_phone ON manual_payment_requests(phone);
 CREATE INDEX IF NOT EXISTS idx_manual_payment_requests_status ON manual_payment_requests(status, created_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_manual_payment_transaction_unique ON manual_payment_requests(transaction_id);
+
+
+-- Limited first-day Premium analysis trial; one lifetime trial per phone.
+CREATE TABLE IF NOT EXISTS premium_trial_usage (
+  phone VARCHAR(30) PRIMARY KEY,
+  trial_started_at TIMESTAMPTZ NOT NULL,
+  requests_used INTEGER NOT NULL DEFAULT 0 CHECK (requests_used >= 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

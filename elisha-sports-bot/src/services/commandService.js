@@ -7,6 +7,7 @@ import { formatSeasonReport } from './historicalSeasonService.js';
 import { analyzeMatch } from './analysisService.js';
 import { getMatchContext, formatMatchContext } from './fixtureContextService.js';
 import { logger } from '../utils/logger.js';
+import { canAccessPremiumFeaturesDuringFreeWindow } from './usageService.js';
 
 const commandRequestSchema = z.object({
   sender: z.string().min(5),
@@ -73,14 +74,13 @@ export async function processIncomingMessage(input) {
 
       case 'analyze':
       case 'analysis':
-        if (!(await hasActivePremiumSubscription(sender))) return premiumRequiredMessage();
+        if (!(await canAccessPremiumFeaturesDuringFreeWindow(sender))) return premiumRequiredMessage();
         return await handleAnalyzeCommand(args);
 
       case 'season':
       case 'historical':
-        if (!(await hasActivePremiumSubscription(sender))) return premiumRequiredMessage();
+        if (!(await canAccessPremiumFeaturesDuringFreeWindow(sender))) return premiumRequiredMessage();
         return await handleSeasonCommand(args);
-
       case 'start':
         await updateUserPreferences(sender, { notifications_enabled: true });
         return 'Notifications enabled. You will now receive match alerts.';
@@ -320,13 +320,6 @@ async function handleAnalyzeCommand(args) {
 }
 
 
-async function hasActivePremiumSubscription(phone) {
-  const subscriptions = await getUserSubscriptions(phone);
-  return subscriptions.some((subscription) =>
-    String(subscription?.plan ?? '').toLowerCase() === 'premium' && subscription?.is_active !== false
-  );
-}
-
 function premiumRequiredMessage() {
-  return '🔒 PREMIUM FEATURE\n\nDetailed match analysis and historical season reports are available to active Premium subscribers.\n\nSend UPGRADE to view plans and payment instructions. Your access will activate only after an administrator verifies your payment.';
+  return '🔒 PREMIUM FEATURE\n\nDetailed match analysis and historical season reports are available to Premium subscribers. Free users can preview all Premium features during the first half of their daily free request allowance.\n\nSend UPGRADE to view plans and payment instructions. Your access will activate only after an administrator verifies your payment.';
 }

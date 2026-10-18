@@ -6,6 +6,7 @@ Node.js/Express WhatsApp football-information bot for fixtures, live scores, sta
 - WhatsApp text webhook, with mock, CallMeBot, and WhatsApp Cloud API messaging adapters.
 - PostgreSQL users, subscriptions, daily usage, sports cache, and manual payment records; Redis caching/rate limiting.
 - Daily quotas default to 20 Free and 200 Premium football-information requests, resetting at midnight Africa/Kampala time. Premium also has a separate 300-request monthly cap; the first limit reached applies.
+- Free users can access all Premium-only commands during the first half of their daily free request allowance; access closes after that threshold until the daily reset or a paid Premium subscription.
 - Mock sports data for development and API-Football for live data when configured.
 - Manual Airtel Money Premium payment by transaction ID only. An administrator must verify the transaction before access is activated.
 - This bot provides football information and factual analysis, not betting recommendations or guaranteed outcomes.
@@ -42,14 +43,16 @@ Health checks:
 - TABLE [LEAGUE]
 - FORM TEAM
 - H2H TEAM A vs TEAM B
-- ANALYZE TEAM A vs TEAM B (Premium only)
+- ANALYZE TEAM A vs TEAM B (Premium; free preview during first half of daily free quota)
 - SEASON [LEAGUE] [YEAR] (Premium only)
 - START and STOP for notification preferences
 
 ## Premium access and quotas
-- `ANALYZE` / `ANALYSIS` and `SEASON` / `HISTORICAL` require an active, unexpired Premium subscription.
+- `ANALYZE` / `ANALYSIS` and `SEASON` / `HISTORICAL` are available to active Premium subscribers at any time.
+- Free users can access all Premium-only commands while their daily football-request usage is at or below half of `FREE_DAILY_REQUEST_LIMIT` (default: requests 1–10 of 20). Starting with request 11, Premium-only commands require a paid subscription until the daily reset. Regular free commands remain available up to the full daily limit.
 - Free defaults: 20 football-data requests per Kampala day. Premium defaults: 200 per day and 300 per Kampala calendar month. The monthly cap is a hard ceiling, so a Premium user can make at most 300 tracked requests in a month even if the daily allowance is higher.
-- Override limits only through `FREE_DAILY_REQUEST_LIMIT`, `PREMIUM_DAILY_REQUEST_LIMIT`, and `PREMIUM_MONTHLY_REQUEST_LIMIT`. Keep README, `.env.example`, and the hosting environment aligned.
+- The Premium preview threshold is calculated as `floor(FREE_DAILY_REQUEST_LIMIT / 2)`; no separate trial timer or per-feature counter is needed.
+- Configure quotas through `FREE_DAILY_REQUEST_LIMIT`, `PREMIUM_DAILY_REQUEST_LIMIT`, and `PREMIUM_MONTHLY_REQUEST_LIMIT`. Keep README, `.env.example`, and hosting settings aligned.
 - Help/menu and payment commands remain available when football-data quota is exhausted.
 
 ## Manual Premium payment

@@ -15,21 +15,12 @@ const [
   import('../src/services/subscriptionService.js')
 ]);
 
-test('free users are blocked from Premium analysis and historical reports', async () => {
-  const analysis = await processIncomingMessage({
-    sender: '256700000010',
-    message: 'ANALYZE Arsenal vs Chelsea',
-    provider: 'mock'
-  });
-  assert.match(analysis, /PREMIUM FEATURE/);
-  assert.match(analysis, /UPGRADE/);
-
-  const season = await processIncomingMessage({
-    sender: '256700000011',
-    message: 'SEASON Premier League 2025',
-    provider: 'mock'
-  });
-  assert.match(season, /PREMIUM FEATURE/);
+test('free users can access every Premium feature during the preview window', async () => {
+  const analysis = await processIncomingMessage({ sender: '256700000010', message: 'ANALYZE Arsenal vs Chelsea', provider: 'mock' });
+  assert.doesNotMatch(analysis, /PREMIUM FEATURE/);
+  assert.match(analysis, /MATCH ANALYSIS|AI MATCH ANALYSIS|could not analyze/i);
+  const season = await processIncomingMessage({ sender: '256700000011', message: 'SEASON Premier League 2025', provider: 'mock' });
+  assert.doesNotMatch(season, /PREMIUM FEATURE/);
 });
 
 test('active Premium subscriber can access the analysis command', async () => {
