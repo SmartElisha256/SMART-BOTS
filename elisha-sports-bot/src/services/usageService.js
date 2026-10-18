@@ -79,11 +79,15 @@ export function getCommandName(message) {
 }
 
 export function isQuotaTrackedMessage(message) {
-  // Every non-empty customer message can invoke the AI fallback, so count it
-  // against the daily quota rather than only counting uppercase commands.
-  return String(message ?? '').trim().length > 0;
-}
-export function getDailyRequestLimit(plan = 'free') {
+  const text = String(message ?? '').trim();
+  if (!text) return false;
+  // Keep simple navigation/preferences free, but count open-ended questions
+  // because they may invoke the AI provider and consume paid tokens.
+  if (/^(menu|help|start|stop|upgrade|hi|hello|hey|good morning|good afternoon|good evening)$/i.test(text)) {
+    return false;
+  }
+  return true;
+}export function getDailyRequestLimit(plan = 'free') {
   return plan === 'premium'
     ? env.PREMIUM_DAILY_REQUEST_LIMIT
     : env.FREE_DAILY_REQUEST_LIMIT;
