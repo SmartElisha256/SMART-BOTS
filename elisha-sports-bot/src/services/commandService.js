@@ -471,15 +471,55 @@ async function handleAnalyzeCommand(args) {
   const parts = args.split(/\s+vs?\s+/i);
   if (parts.length !== 2 || !parts[0].trim() || !parts[1].trim()) return 'Usage: ANALYZE Arsenal vs Chelsea';
   const [teamA, teamB] = parts.map((part) => part.trim());
-  try {
-    const prediction = await predictFootballMatch({ homeTeam: teamA, awayTeam: teamB });
-    const mlText = formatMlPrediction(prediction);
-    const aiText = await getFootballAssistantReply(`Explain this football ML prediction using only the supplied values. Do not invent or alter probabilities, statistics, injuries, lineups, or current facts. Explain the leading outcome and key uncertainty.\n${JSON.stringify({ fixture: prediction.fixture, match_result: prediction.match_result, machine_learning_result: prediction.machine_learning_result, double_chance: prediction.double_chance, goal_markets: prediction.goal_markets, btts: prediction.btts, expected_goals: prediction.expected_goals, correct_score: prediction.correct_score, confidence: prediction.confidence, data_quality: prediction.data_quality })}`);
-    return appendBettingDisclaimer(`${mlText}${aiText ? `\n\n🤖 AI EXPLANATION\n${aiText}` : '\n\nAI explanation is unavailable; showing the ML output only.'}`);
-  } catch (error) {
-    logger.warn({ error, teamA, teamB }, 'ML prediction unavailable for match');
-    return appendBettingDisclaimer(`⚠️ MATCH ANALYSIS — ML + AI PREDICTION UNAVAILABLE\n\nI could not produce a model-based prediction for ${teamA} vs ${teamB}. I will not replace missing model output with invented probabilities. ${error.message}\n\nCheck that Python dependencies and trained model files are available on the deployed server.`);
+
+  // ML and contextual data are independent: one failing must not fabricate
+  // values or suppress the other valid result.
+  const [predictionResult, contextResult] = await Promise.allSettled([
+    predictFootballMatch({ homeTeam: teamA, awayTeam: teamB }),
+    getMatchContext(teamA, teamB)
+  ]);
+
+  const prediction = predictionResult.status === 'fulfilled' ? predictionResult.value : null;
+  const context = contextResult.status === 'fulfilled' ? contextResult.value : null;
+  const contextText = context ? formatMatchContext(context) : 'PRE-MATCH SQUAD & TEAM CONTEXT\nContext providers failed or are unavailable; do not infer current injuries, lineups, or team statistics.';
+  const predictionText = prediction ? formatMlPrediction(prediction) : ('ML prediction unavailable: ' + (predictionResult.reason?.message || 'model unavailable'));
+
+  if (!prediction && !context) {
+    logger.warn({ teamA, teamB, predictionError: predictionResult.reason, contextError: contextResult.reason }, 'ML and match context both unavailable');
+    return '⚠️ MATCH ANALYSIS UNAVAILABLE\n\nI could not retrieve a model prediction or match context for ' + teamA + ' vs ' + teamB + '. I will not invent probabilities, injuries, lineups, or statistics. Check the deployed Python runtime, trained models, and configured football-data providers.';
   }
+
+  let aiText = null;
+  try {
+    aiText = await getFootballAssistantReply([
+      'Explain the supplied football evidence for the user.',
+      'Use only facts and numerical values explicitly supplied below. Do not invent, update, or infer injuries, lineups, team news, recent results, probabilities, or statistics.',
+      'Separate model estimates from retrieved context. Mention unavailable or low-quality data and explain uncertainty.',
+      'Do not claim a forecast is certain.',
+      prediction ? 'MODEL OUTPUT:\n' + JSON.stringify({
+        fixture: prediction.fixture,
+        match_result: prediction.match_result,
+        machine_learning_result: prediction.machine_learning_result,
+        double_chance: prediction.double_chance,
+        goal_markets: prediction.goal_markets,
+        btts: prediction.btts,
+        expected_goals: prediction.expected_goals,
+        correct_score: prediction.correct_score,
+        confidence: prediction.confidence,
+        data_quality: prediction.data_quality
+      }) : 'MODEL OUTPUT: unavailable.',
+      'RETRIEVED CONTEXT:\n' + contextText
+    ].join('\n\n'));
+  } catch (error) {
+    logger.warn({ error, teamA, teamB }, 'AI explanation unavailable for match analysis');
+  }
+
+  const partsOut = [
+    prediction ? predictionText : ('⚠️ ML MODEL\n' + predictionText),
+    context ? ('\n\n📚 DATA & TEAM CONTEXT\n' + contextText) : '\n\n📚 DATA & TEAM CONTEXT\nCurrent context could not be retrieved; no current team-news claims are made.',
+    aiText ? ('\n\n🤖 AI EXPLANATION\n' + aiText) : '\n\nAI explanation is unavailable; showing only successfully retrieved data and model output.'
+  ];
+  return appendBettingDisclaimer(partsOut.join(''));
 }
 
 async function hasActivePremiumSubscription(phone) {
