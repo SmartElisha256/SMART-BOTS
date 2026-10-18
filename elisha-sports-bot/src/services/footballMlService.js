@@ -8,19 +8,49 @@ const pythonBin = process.env.PYTHON_BIN || 'python3';
 const TIMEOUT_MS = 15000;
 
 export function detectFootballIntent(input) {
-  const text = String(input ?? '').trim().toLowerCase();
+  const original = String(input ?? '').trim();
+  const text = original
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[’‘]/g, "'")
+    .replace(/[?!,;]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!text) return 'unknown';
 
-  const conceptQuestion = /\b(what is|what does|define|meaning of|explain)\s+(?:an?\s+)?(?:xg|expected goals|btts|double chance|offside|4-3-3|formation|football tactics)\b/i;
-  if (conceptQuestion.test(text) && !/\b(?:vs?\.?|versus|against|predict|prediction|probabilit|today'?s? tip|betting|odds)\b/i.test(text)) return 'ai_only';
+  // Concept/learning requests take priority unless the user also asks for a
+  // specific match forecast or match-specific/current evidence.
+  const conceptIntent = /\b(what is|what are|what does|define|meaning of|explain|teach me|how does|how do|rules of|difference between|why do|how to understand)\b/i.test(text);
+  const conceptTerms = /\b(xg|expected goals|btts|double chance|offside|formation|football tactics|pressing|possession|counterattack|counter attack|4-3-3|4-2-3-1|false nine|high line|set pieces?|yellow cards?|red cards?|penalt(?:y|ies)|corner kicks?)\b/i.test(text);
+  const matchSeparator = /\b(?:vs\.?|v\.?|versus|against)\b/i.test(text);
+  const explicitForecast = /\b(predict|prediction|forecast|who will win|who might win|who wins|chance of winning|chance of a draw|match analysis|analy[sz]e|compare these teams|compare the teams|tips? today|today'?s? tips?)\b/i.test(text);
+  const explicitData = /\b(live|right now|currently|latest|recent|last \d+|last five|last five games|form|head.to.head|h2h|standings|league table|table position|injur(?:y|ies)|squad news|team news|lineup|line-ups|starting eleven|shots|shots on target|possession stats|current score|live score|fixture|fixtures|upcoming match|historical record|recent results)\b/i.test(text);
+  const hasTwoTeamShape = matchSeparator && text.split(/\b(?:vs\.?|v\.?|versus|against)\b/i).length >= 2;
+  const marketTerms = /\b(1x2|double chance|over\s*\/?\s*under|btts|both teams to score|correct score|expected goals|xg|probabilit(?:y|ies)|goal markets?)\b/i.test(text);
 
-  const predictionIntent = /\b(predict|prediction|predicting|who will win|who might win|who wins|best pick|tips? today|today'?s? tips?|betting|odds|1x2|double chance|over\s*\/?\s*under|btts|both teams to score|correct score|expected goals|xg|probabilit(?:y|ies)|chance of (?:winning|a draw)|match analysis|analy[sz]e .{1,80}\b(?:vs?\.?|versus|against)\b)\b/i;
-  const matchup = /\b.{2,60}\s+(?:vs?\.?|versus|against)\s+.{2,60}\b/i;
-  if (predictionIntent.test(text) || matchup.test(text)) return 'ml_ai';
+  if (conceptIntent && conceptTerms && !hasTwoTeamShape && !explicitForecast && !explicitData) {
+    return 'ai_only';
+  }
 
-  const conceptIntent = /\b(what is|explain|define|how does|how do|teach me|rules of|meaning of|formation|tactics|offside|penalty rule|referee|football history|what does .{1,30} mean)\b/i;
-  if (conceptIntent.test(text)) return 'ai_only';
-  return 'ai_only';
+  // A match-specific answer benefits from verified data first, then the model,
+  // followed by an explanation grounded only in returned evidence.
+  if (hasTwoTeamShape && (explicitData || /\b(today|tonight|tomorrow|this week|team stats|statistics|stats|form|h2h|head.to.head|injur(?:y|ies)|lineup|line-ups|squad)\b/i.test(text))) {
+    return 'data_ml_ai';
+  }
+
+  // Market labels without a named match are underspecified; do not launch a model.
+  if (marketTerms && !hasTwoTeamShape && !explicitForecast) return 'unknown';
+
+  if (hasTwoTeamShape || (explicitForecast && (marketTerms || /\bmatch|team|teams|football|soccer\b/i.test(text)))) {
+    return 'ml_ai';
+  }
+
+  if (explicitForecast && !hasTwoTeamShape) return 'unknown';
+  if (explicitData) return 'data_only';
+  if (conceptIntent || conceptTerms || /\b(football|soccer|match|team|player|league|coach|manager|tournament|referee)\b/i.test(text)) {
+    return 'ai_only';
+  }
+  return 'unknown';
 }
 
 export async function predictFootballMatch({ homeTeam, awayTeam, kickoff = null }) {

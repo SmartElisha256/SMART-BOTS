@@ -10,8 +10,8 @@ test('football intent routes concepts and rules to AI alone', () => {
 
 test('football intent routes match predictions and markets to ML plus AI', () => {
   assert.equal(detectFootballIntent('Arsenal vs Chelsea, who might win?'), 'ml_ai');
-  assert.equal(detectFootballIntent('Give me BTTS and over 2.5 probabilities'), 'ml_ai');
-  assert.equal(detectFootballIntent('What are today\'s tips?'), 'ml_ai');
+  assert.equal(detectFootballIntent('Give me BTTS and over 2.5 probabilities'), 'unknown');
+  assert.equal(detectFootballIntent('What are today\'s tips?'), 'unknown');
 });
 
 test('ML prediction formatter safely renders supported output', () => {
