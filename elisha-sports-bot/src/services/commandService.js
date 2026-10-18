@@ -53,7 +53,7 @@ export function interpretNaturalLanguage(input) {
 
   const naturalH2HQuestion = text.replace(/[?!,]+/g, ' ').match(/^(?:what is|what's|tell me|please show|show|get|give me|check) (?:the )?(?:h2h|head to head)(?: record| stats| history)?(?: for)? (.+?) (?:vs|versus|against) (.+)$/);
   if (naturalH2HQuestion && naturalH2HQuestion[1] && naturalH2HQuestion[2]) return { command: 'h2h', args: naturalH2HQuestion[1].trim() + ' vs ' + naturalH2HQuestion[2].trim(), raw: text };
-  const matchup = text.replace(/[,?!]+/g, ' ').match(/(?:^|\b)(?:analyze|analyse|analysis|predict|prediction|who will win|who might win|who wins|tip for|odds for|what do you think about|compare)\s+(?:the\s+)?(.+?)\s+(?:vs\.?|v\.?|versus|against)\s+(.+?)(?:\s+(?:match|game|today|prediction|analysis))?$/);
+  const matchup = text.replace(/[,?!]+/g, ' ').match(/(?:^|\b)(?:please )?(?:analyze|analyse|analysis|predict|prediction|who will win|who might win|who wins|tip for|odds for|what do you think about|compare)\s+(?:the\s+)?(.+?)\s+(?:vs\.?|v\.?|versus|against)\s+(.+?)(?:\s+(?:match|game|today|prediction|analysis))?$/);
   const plainMatchup = text.replace(/[,?!]+/g, ' ').match(/^(.+?)\s+(?:vs\.?|v\.?|versus|against)\s+(.+?)(?:\s+(?:who will win|who might win|who wins|prediction|analysis|today))?$/);
   const pair = matchup || ((/\b(who will win|who might win|who wins|predict|prediction|analy[sz]e|analysis|h2h|head to head|tip)\b/.test(text)) ? plainMatchup : null);
   if (pair) {
