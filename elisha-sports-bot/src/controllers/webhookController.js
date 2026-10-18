@@ -59,7 +59,7 @@ export async function handleIncomingWebhook(req, res) {
     for (const message of messages) {
       let reply;
       let paymentNotification = null;
-      const adminControlCommand = /^(approve|reject|setplan|changeplan|pending|pendingpayments|payments)(?:\\s|$)/i.test(message.text);
+      const adminControlCommand = /^(approve|reject|setplan|changeplan|pending|pendingpayments|payments)(?:\s|$)/i.test(message.text);
       if (isPaymentAdmin(message.sender) && !adminControlCommand) {
         // The personal admin number is reserved for payment alerts and admin controls;
         // it must not create a customer profile or consume sports-request quota.
