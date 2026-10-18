@@ -8,6 +8,7 @@ import { analyzeMatch } from './analysisService.js';
 import { getMatchContext, formatMatchContext } from './fixtureContextService.js';
 import { logger } from '../utils/logger.js';
 import { answerFootballQuestion } from './footballAssistantService.js';
+import { predictFootballMatch, formatMlPrediction, detectFootballIntent } from './footballMlService.js';
 
 const commandRequestSchema = z.object({
   sender: z.string().min(5),
@@ -145,6 +146,9 @@ export async function processIncomingMessage(input) {
         return 'Reply UPGRADE to see Premium plans and payment instructions.';
 
       case 'football_help': {
+        if (detectFootballIntent(raw) === 'ml_ai') {
+          return 'Please include the two teams for a match prediction, for example: Arsenal vs Chelsea, who might win?';
+        }
         const aiReply = await getFootballAssistantReply(raw);
         return aiReply || getFriendlyFallback();
       }
@@ -309,14 +313,25 @@ async function handleTipCommand() {
   try {
     const fixtures = await getUpcomingFixtures({ limit: 5, onlyResults: false });
     if (!fixtures || fixtures.length === 0) {
-      return appendBettingDisclaimer('⚽ TODAY’S TIP\n\nI cannot responsibly suggest a match pick because no upcoming fixtures are available from the configured data source. Please try FIXTURES later. I will not invent a match or probability.');
+      return appendBettingDisclaimer('⚽ TODAY’S TIP\\n\\nI cannot responsibly suggest a match pick because no upcoming fixtures are available from the configured data source. Please try FIXTURES later. I will not invent a match or probability.');
     }
     const list = fixtures.map((match, index) => {
       const time = match.time ? new Date(match.time).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Kickoff time unavailable';
-      return `${index + 1}. ${match.home} vs ${match.away}\n   ${time}`;
-    }).join('\n\n');
-    const demo = fixtures[0]?.source !== 'api-football';
-    return appendBettingDisclaimer(`⚽ TODAY’S TIP — FIXTURE CHECK\n\n${demo ? '⚠️ DEMO DATA — these are not verified live fixtures, so no pick or probability is provided.\n\n' : ''}${list}\n\nReply “ANALYZE Team A vs Team B” with a match you want assessed. Detailed analysis may require Premium.\n\nAny analysis is uncertain and is not a guarantee of a result.`);
+      return `${index + 1}. ${match.home} vs ${match.away}\\n   ${time}`;
+    }).join('\\n\\n');
+    if (fixtures[0]?.source !== 'api-football') {
+      return appendBettingDisclaimer(`⚽ TODAY’S TIP — FIXTURE CHECK\\n\\n⚠️ DEMO DATA — these are not verified live fixtures, so I will not run or present an ML prediction for them.\\n\\n${list}\\n\\nTry again when verified fixtures are available.`);
+    }
+    const selected = fixtures[0];
+    try {
+      const prediction = await predictFootballMatch({ homeTeam: selected.home, awayTeam: selected.away, kickoff: selected.time ?? null });
+      const mlText = formatMlPrediction(prediction);
+      const aiText = await getFootballAssistantReply(`Explain this ML output using only the supplied values. Do not invent or alter probabilities, statistics, team news, or facts.\\n${JSON.stringify({ match_result: prediction.match_result, double_chance: prediction.double_chance, goal_markets: prediction.goal_markets, btts: prediction.btts, expected_goals: prediction.expected_goals, confidence: prediction.confidence, data_quality: prediction.data_quality })}`);
+      return appendBettingDisclaimer(`⚽ TODAY’S ML + AI TIP\\n\\n${mlText}${aiText ? `\\n\\n🤖 AI EXPLANATION\\n${aiText}` : ''}`);
+    } catch (error) {
+      logger.warn({ error }, 'ML prediction unavailable for today tip');
+      return appendBettingDisclaimer(`⚽ TODAY’S TIP\\n\\nVerified fixtures are available, but the ML model could not produce a prediction. I will not invent a pick or probability. ${error.message}`);
+    }
   } catch (error) {
     logger.error({ error }, 'Error checking fixtures for tip request');
     return appendBettingDisclaimer('I could not check fixtures for a tip right now. Please try again later. I will not make up a pick or probability.');
@@ -442,29 +457,20 @@ export default processIncomingMessage;
 
 
 async function handleAnalyzeCommand(args) {
-  if (!args || !/\s+vs?\s+/i.test(args)) {
-    return 'Usage: ANALYZE Arsenal vs Chelsea';
-  }
-  const parts = args.split(/\s+vs?\s+/i);
-  if (parts.length !== 2 || !parts[0].trim() || !parts[1].trim()) {
-    return 'Usage: ANALYZE Arsenal vs Chelsea';
-  }
+  if (!args || !/\\s+vs?\\s+/i.test(args)) return 'Usage: ANALYZE Arsenal vs Chelsea';
+  const parts = args.split(/\\s+vs?\\s+/i);
+  if (parts.length !== 2 || !parts[0].trim() || !parts[1].trim()) return 'Usage: ANALYZE Arsenal vs Chelsea';
   const [teamA, teamB] = parts.map((part) => part.trim());
   try {
-    const [formA, formB, h2h, context] = await Promise.all([
-      getTeamFormStats(teamA, { limit: 5 }),
-      getTeamFormStats(teamB, { limit: 5 }),
-      getHeadToHeadRecord(teamA, teamB),
-      getMatchContext(teamA, teamB).catch((error) => ({ dataQuality: { status: 'partial', warnings: [error.message] } }))
-    ]);
-    const analysis = await analyzeMatch({ teamA, teamB, formA, formB, h2h, matchContext: context ? formatMatchContext(context) : null });
-    return appendBettingDisclaimer(analysis);
+    const prediction = await predictFootballMatch({ homeTeam: teamA, awayTeam: teamB });
+    const mlText = formatMlPrediction(prediction);
+    const aiText = await getFootballAssistantReply(`Explain this football ML prediction using only the supplied values. Do not invent or alter probabilities, statistics, injuries, lineups, or current facts. Explain the leading outcome and key uncertainty.\\n${JSON.stringify({ fixture: prediction.fixture, match_result: prediction.match_result, machine_learning_result: prediction.machine_learning_result, double_chance: prediction.double_chance, goal_markets: prediction.goal_markets, btts: prediction.btts, expected_goals: prediction.expected_goals, correct_score: prediction.correct_score, confidence: prediction.confidence, data_quality: prediction.data_quality })}`);
+    return appendBettingDisclaimer(`${mlText}${aiText ? `\\n\\n🤖 AI EXPLANATION\\n${aiText}` : '\\n\\nAI explanation is unavailable; showing the ML output only.'}`);
   } catch (error) {
-    logger.error({ error, teamA, teamB }, 'Error analyzing match');
-    return appendBettingDisclaimer('I could not analyze that match because the sports data service failed. Please try again later.');
+    logger.warn({ error, teamA, teamB }, 'ML prediction unavailable for match');
+    return appendBettingDisclaimer(`⚠️ ML + AI PREDICTION UNAVAILABLE\\n\\nI could not produce a model-based prediction for ${teamA} vs ${teamB}. I will not replace missing model output with invented probabilities. ${error.message}\\n\\nCheck that Python dependencies and trained model files are available on the deployed server.`);
   }
 }
-
 
 async function hasActivePremiumSubscription(phone) {
   const subscriptions = await getUserSubscriptions(phone);
