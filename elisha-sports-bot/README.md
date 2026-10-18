@@ -43,7 +43,7 @@ Health checks:
 - TABLE [LEAGUE]
 - FORM TEAM
 - H2H TEAM A vs TEAM B
-- ANALYZE TEAM A vs TEAM B (Premium only)
+- ANALYZE TEAM A vs TEAM B (Premium; 3 first-day trial analyses for new users)
 - SEASON [LEAGUE] [YEAR] (Premium only)
 - START and STOP for notification preferences
 
