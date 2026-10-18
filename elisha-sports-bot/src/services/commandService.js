@@ -16,6 +16,9 @@ const commandRequestSchema = z.object({
 
 const COMMAND_REGEX = /^([a-z0-9]+)(?:\s+(.+))?$/i;
 
+const BETTING_DISCLAIMER = 'Disclaimer: This statistical analysis is intended for adults aged 18 and above. Gambling can be psychologically harmful and can lead to financial loss. Tips are derived from statistical analysis, not certainty. Use any tips responsibly and stake only what you can afford to lose.';
+function appendBettingDisclaimer(message) { return `${message}\\n\\n${BETTING_DISCLAIMER}`; }
+
 /**
  * Translate common conversational messages into the bot's existing commands.
  * This is a lightweight, deterministic intent matcher (no paid AI call), not
@@ -280,14 +283,14 @@ async function handleTipCommand() {
   try {
     const fixtures = await getUpcomingFixtures({ limit: 5, onlyResults: false });
     if (!fixtures || fixtures.length === 0) {
-      return '⚽ TODAY’S TIP\n\nI cannot responsibly suggest a match pick because no upcoming fixtures are available from the configured data source. Please try FIXTURES later. I will not invent a match or probability.';
+      return appendBettingDisclaimer('⚽ TODAY’S TIP\n\nI cannot responsibly suggest a match pick because no upcoming fixtures are available from the configured data source. Please try FIXTURES later. I will not invent a match or probability.');
     }
     const list = fixtures.map((match, index) => {
       const time = match.time ? new Date(match.time).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Kickoff time unavailable';
       return `${index + 1}. ${match.home} vs ${match.away}\n   ${time}`;
     }).join('\n\n');
     const demo = fixtures[0]?.source !== 'api-football';
-    return `⚽ TODAY’S TIP — FIXTURE CHECK\n\n${demo ? '⚠️ DEMO DATA — these are not verified live fixtures, so no pick or probability is provided.\n\n' : ''}${list}\n\nReply “ANALYZE Team A vs Team B” with a match you want assessed. Detailed analysis may require Premium.\n\nAny analysis is uncertain and is not a guarantee of a result.`;
+    return appendBettingDisclaimer(`⚽ TODAY’S TIP — FIXTURE CHECK\n\n${demo ? '⚠️ DEMO DATA — these are not verified live fixtures, so no pick or probability is provided.\n\n' : ''}${list}\n\nReply “ANALYZE Team A vs Team B” with a match you want assessed. Detailed analysis may require Premium.\n\nAny analysis is uncertain and is not a guarantee of a result.`);
   } catch (error) {
     logger.error({ error }, 'Error checking fixtures for tip request');
     return appendBettingDisclaimer('I could not check fixtures for a tip right now. Please try again later. I will not make up a pick or probability.');
