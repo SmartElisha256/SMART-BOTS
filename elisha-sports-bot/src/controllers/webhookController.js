@@ -50,7 +50,7 @@ export async function handleIncomingWebhook(req, res) {
     for (const change of entry.changes ?? []) {
       for (const message of change.value?.messages ?? []) {
         if (message.from && typeof message.text?.body === 'string' && message.text.body.trim()) messages.push({ sender: message.from, text: message.text.body.trim(), type: 'text' });
-        else if (message.from && message.type === 'audio') messages.push({ sender: message.from, text: '', type: 'audio' });
+        else if (message.from && (message.type === 'audio' || message.type === 'image')) messages.push({ sender: message.from, text: '', type: message.type });
       }
     }
   }
@@ -61,17 +61,17 @@ export async function handleIncomingWebhook(req, res) {
       let reply;
       let paymentNotification = null;
       const adminControlCommand = /^(approve|reject|setplan|changeplan|pending|pendingpayments|payments)(?:\s|$)/i.test(message.text);
-      if (message.type === 'audio') {
+      if (message.type === 'audio' || message.type === 'image') {
         if (isPaymentAdmin(message.sender)) {
           reply = '🔐 This number is reserved for payment alerts and admin controls. Use the customer-facing bot number for sports features.';
         } else {
-          const quota = await checkAndConsumeDailyRequest(message.sender, '[voice note]');
+          const quota = await checkAndConsumeDailyRequest(message.sender, message.type === 'audio' ? '[voice note]' : '[image or screenshot]');
           if (!quota.allowed) {
             const period = quota.period === 'month' ? 'month' : 'day';
             if (!(await claimQuotaNotice(message.sender, period))) continue;
             reply = formatQuotaLimitMessage(quota);
           } else {
-            reply = '🎙️ Thanks for the voice note! I cannot understand voice notes yet. Voice-message understanding is planned for a future upgrade. For now, please type your football question, for example: “What matches are on today?” or “Arsenal vs Chelsea, who might win?”';
+            reply = message.type === 'audio'\n              ? '🎙️ Thanks for the voice note! Voice-message understanding is planned for a future upgrade. For now, please type your football question, for example: “What matches are on today?” or “Arsenal vs Chelsea, who might win?”'\n              : '🖼️ Thanks for sharing the image! Image and screenshot analysis is planned for the next upgrade. You can still get help now by typing the match, teams, or statistics shown in the image. I look forward to helping you with image analysis soon!';
           }
         }
         await provider.sendMessage({ to: message.sender, text: reply });
