@@ -3,14 +3,22 @@ import { Queue } from 'bullmq';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 
-const connection = env.REDIS_URL ? new IORedis(env.REDIS_URL) : null;
+const connection = env.REDIS_URL
+  ? new IORedis(env.REDIS_URL, { maxRetriesPerRequest: null })
+  : null;
 
-export const sportsQueue = connection ? new Queue('elisha-sports-bot', { connection }) : null;
+export const sportsQueue = connection
+  ? new Queue('elisha-sports-bot', { connection })
+  : null;
 
 logger.info(
   { configured: Boolean(sportsQueue), maxAttempts: env.JOB_MAX_ATTEMPTS, concurrency: env.JOB_CONCURRENCY },
   'BullMQ queue initialized'
 );
+
+export function isQueueAvailable() {
+  return Boolean(sportsQueue);
+}
 
 export async function addNotificationJob({ phone, text }) {
   if (!sportsQueue) {
@@ -23,10 +31,7 @@ export async function addNotificationJob({ phone, text }) {
       { phone, text },
       {
         attempts: env.JOB_MAX_ATTEMPTS,
-        backoff: {
-          type: 'exponential',
-          delay: 1000
-        },
+        backoff: { type: 'exponential', delay: 1000 },
         removeOnComplete: true,
         removeOnFail: false
       }
@@ -40,15 +45,47 @@ export async function addNotificationJob({ phone, text }) {
   }
 }
 
+/**
+ * Heavy ANALYZE / TIP work runs off the webhook path so Meta does not retry.
+ * The worker delivers the final WhatsApp reply when finished.
+ */
+export async function addAnalysisJob({ phone, kind, args, provider = 'whatsapp' }) {
+  if (!sportsQueue) {
+    return { ok: false, queued: false, reason: 'Redis not configured' };
+  }
+
+  try {
+    const job = await sportsQueue.add(
+      'match-analysis',
+      { phone, kind, args: args ?? null, provider },
+      {
+        attempts: Math.min(env.JOB_MAX_ATTEMPTS, 2),
+        backoff: { type: 'exponential', delay: 2000 },
+        removeOnComplete: 100,
+        removeOnFail: 50,
+        // Avoid stacking identical analysis for the same user within a short window.
+        jobId: `analysis:${phone}:${kind}:${String(args ?? '').toLowerCase().slice(0, 80)}`
+      }
+    );
+
+    logger.info({ jobId: job.id, phone, kind }, 'Analysis job enqueued');
+    return { ok: true, queued: true, jobId: job.id };
+  } catch (error) {
+    // BullMQ rejects duplicate jobId while active; treat as already queued.
+    if (String(error.message || '').includes('Job') && String(error.message || '').includes('exists')) {
+      return { ok: true, queued: true, deduped: true };
+    }
+    logger.error({ phone, kind, error: error.message }, 'Failed to enqueue analysis job');
+    throw error;
+  }
+}
+
 export async function getQueueStats() {
   if (!sportsQueue) return { configured: false };
 
   try {
     const counts = await sportsQueue.getJobCounts('wait', 'active', 'completed', 'failed');
-    return {
-      configured: true,
-      jobs: counts
-    };
+    return { configured: true, jobs: counts };
   } catch (error) {
     logger.error({ error: error.message }, 'Failed to get queue stats');
     return { configured: true, error: error.message };

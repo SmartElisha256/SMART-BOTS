@@ -1,14 +1,23 @@
 import { z } from 'zod';
-import { upsertUser, findUserByPhone } from './userService.js';
+import { upsertUser } from './userService.js';
 import { getUserPreferences, updateUserPreferences } from './preferencesService.js';
-import { getUserSubscriptions, subscribeUser, unsubscribeUser } from './subscriptionService.js';
-import { getUpcomingFixtures, getLeagueTable, getTeamFormStats, getHeadToHeadRecord, getHistoricalSeasonFixtures } from './sportsService.js';
-import { formatSeasonReport } from './historicalSeasonService.js';
-import { analyzeMatch } from './analysisService.js';
-import { getMatchContext, formatMatchContext } from './fixtureContextService.js';
-import { logger } from '../utils/logger.js';
+import { getUserSubscriptions } from './subscriptionService.js';
 import { answerFootballQuestion } from './footballAssistantService.js';
-import { predictFootballMatch, formatMlPrediction, detectFootballIntent } from './footballMlService.js';
+import { detectFootballIntent } from './footballMlService.js';
+import { logger } from '../utils/logger.js';
+import { parseCommand } from '../commands/intentParser.js';
+import { getMenuMessage, getHelpMessage, getFriendlyFallback, premiumRequiredMessage } from '../commands/messages.js';
+import {
+  handleFixturesCommand,
+  handleLiveCommand,
+  handleTableCommand,
+  handleFormCommand,
+  handleH2HCommand,
+  handleSeasonCommand,
+  handleLeaguesCommand
+} from '../commands/sportsCommands.js';
+import { runAnalyzeCommand, runTipCommand } from '../commands/analyzeCommand.js';
+import { addAnalysisJob, isQueueAvailable } from '../jobs/queue.js';
 
 const commandRequestSchema = z.object({
   sender: z.string().min(5),
@@ -16,114 +25,42 @@ const commandRequestSchema = z.object({
   provider: z.enum(['whatsapp', 'callmebot', 'mock']).default('whatsapp')
 });
 
-const COMMAND_REGEX = /^([a-z0-9]+)(?:\s+(.+))?$/i;
-
-const BETTING_DISCLAIMER = 'Disclaimer: This statistical analysis is intended for adults aged 18 and above. Gambling can be psychologically harmful and can lead to financial loss. Tips are derived from statistical analysis, not certainty. Use any tips responsibly and stake only what you can afford to lose.';
-function appendBettingDisclaimer(message) { return `${message}\n\n${BETTING_DISCLAIMER}`; }
-
-/**
- * Translate common conversational messages into the bot's existing commands.
- * This is a lightweight, deterministic intent matcher (no paid AI call), not
- * an unrestricted chatbot. It must not invent sports facts or predictions.
- */
-export function interpretNaturalLanguage(input) {
-  const text = String(input ?? '').trim().toLowerCase()
-    .replace(/[’‘]/g, "'")
-    .replace(/[?!.,]+$/g, '')
-    .replace(/\s+/g, ' ');
-
-  if (!text) return { command: null, args: null, raw: text };
-  if (/^(hi|hello|hey|good morning|good afternoon|good evening)\b/.test(text)) {
-    return { command: 'menu', args: null, raw: text };
+async function getFootballAssistantReply(question) {
+  try {
+    return await answerFootballQuestion(question);
+  } catch (error) {
+    logger.warn({ error }, 'Open-ended football AI unavailable; using friendly fallback');
+    return null;
   }
-  if (/\b(help|what can you do|how do i use you)\b/.test(text)) {
-    return { command: 'help', args: null, raw: text };
-  }
-  // Preserve explicit H2H command syntax before the general matchup interpreter.
-  if (/^h2h\s+/.test(text)) return { command: 'h2h', args: text.replace(/^h2h\s+/, '').trim(), raw: text };
-  if (/\b(today'?s? tips?|tips today|best pick today|today'?s? best pick|give me a tip|football tip today|today tip)\b/.test(text)) {
-    return { command: 'tip', args: null, raw: text };
-  }
-  if (/\b(live scores?|scores? right now|matches live|what'?s live)\b/.test(text)) {
-    return { command: 'live', args: null, raw: text };
-  }
-  if (/\b(fixtures?|matches today|games today|upcoming matches|what matches are on|who is playing today)\b/.test(text)) {
-    return { command: 'fixtures', args: null, raw: text };
-  }
-  if (/\b(league table|standings|table for|show the table)\b/.test(text)) {
-    const league = text.match(/(?:table for|standings for) (.+)$/)?.[1];
-    return { command: 'table', args: league || null, raw: text };
-  }
-
-  const earlyH2H = text.replace(/[?!,]+/g, ' ').match(/^(?:please )?(?:show|get|give me|check) (?:the )?(?:h2h|head to head)(?: record| stats| history)? (.+?) (?:vs|versus|against) (.+)$/);
-  if (earlyH2H && earlyH2H[1] && earlyH2H[2]) return { command: 'h2h', args: earlyH2H[1].trim() + ' vs ' + earlyH2H[2].trim(), raw: text };
-
-  const naturalH2HQuestion = text.replace(/[?!,]+/g, ' ').match(/^(?:what is|what's|tell me|please show|show|get|give me|check) (?:the )?(?:h2h|head to head)(?: record| stats| history)?(?: for)? (.+?) (?:vs|versus|against) (.+)$/);
-  if (naturalH2HQuestion && naturalH2HQuestion[1] && naturalH2HQuestion[2]) return { command: 'h2h', args: naturalH2HQuestion[1].trim() + ' vs ' + naturalH2HQuestion[2].trim(), raw: text };
-  const matchup = text.replace(/[,?!]+/g, ' ').match(/(?:^|\b)(?:please )?(?:analyze|analyse|analysis|predict|prediction|who will win|who might win|who wins|tip for|odds for|what do you think about|compare)\s+(?:the\s+)?(.+?)\s+(?:vs\.?|v\.?|versus|against)\s+(.+?)(?:\s+(?:match|game|today|prediction|analysis))?$/);
-  const plainMatchup = text.replace(/[,?!]+/g, ' ').match(/^(.+?)\s+(?:vs\.?|v\.?|versus|against)\s+(.+?)(?:\s+(?:who will win|who might win|who wins|prediction|analysis|today))?$/);
-  const pair = matchup || ((/\b(who will win|who might win|who wins|predict|prediction|analy[sz]e|analysis|h2h|head to head|tip)\b/.test(text)) ? plainMatchup : null);
-  if (pair) {
-    const teamA = (pair[1] ?? '').trim();
-    const teamB = (pair[2] ?? '').trim().replace(/[, ]+$/g, '');
-    if (teamA && teamB) {
-      const command = /\b(h2h|head to head)\b/.test(text) ? 'h2h' : 'analyze';
-      return { command, args: `${teamA} vs ${teamB}`, raw: text };
-    }
-  }
-
-  const formMatch = text.match(/^(?:how is|how's|how are|tell me about|show me the form of|form of|recent form for)\s+(.+?)(?:\s+doing)?$/);
-  if (formMatch?.[1] && !/^(the team|football|it)$/i.test(formMatch[1])) {
-    return { command: 'form', args: formMatch[1].trim(), raw: text };
-  }
-
-  // Conversational football intents that do not use command syntax.
-  const normalizedQuestion = text.replace(/[?!,]+/g, ' ').replace(/\s+/g, ' ').trim();
-  const h2hCommandLike = normalizedQuestion.match(/^(?:please )?(?:show|get|give me|check) (?:the )?(?:h2h|head to head)(?: record| stats| history)? (.+?) (?:vs|versus|against) (.+)$/);
-  if (h2hCommandLike && h2hCommandLike[1] && h2hCommandLike[2]) {
-    return { command: 'h2h', args: h2hCommandLike[1].trim() + ' vs ' + h2hCommandLike[2].trim(), raw: text };
-  }
-  const h2hNatural = normalizedQuestion.match(/(?:show|get|give me|check|what is|tell me)? ?(?:the )?(?:h2h|head to head)(?: record| stats| history)? for (.+?) (?:vs|versus|against) (.+)$/);
-  if (h2hNatural && h2hNatural[1] && h2hNatural[2]) {
-    return { command: 'h2h', args: h2hNatural[1].trim() + ' vs ' + h2hNatural[2].trim(), raw: text };
-  }
-  const formNatural = normalizedQuestion.match(/^(?:how is|how's|how are|tell me about|show me the form of|form of|recent form for|recent results for) (.+?)(?: doing)?$/);
-  if (formNatural && formNatural[1] && !/^(the team|football|it)$/i.test(formNatural[1])) {
-    return { command: 'form', args: formNatural[1].trim(), raw: text };
-  }
-  if (/\b(upgrade|premium plans?|pricing|subscribe|subscription)\b/.test(text)) {
-    return { command: 'upgrade', args: null, raw: text };
-  }
-  const explicitCommand = text.match(COMMAND_REGEX);
-  if (explicitCommand && /^(menu|help|fixtures|live|table|form|h2h|analyze|analysis|season|historical|tip|tips|start|stop)$/.test(explicitCommand[1])) {
-    if (!(explicitCommand[1] === 'form' && /^form of\s+/.test(text))) {
-      return { command: explicitCommand[1], args: explicitCommand[2] ? explicitCommand[2].trim() : null, raw: text };
-    }
-  }
-  // Use the richer intent classifier as a fallback after explicit commands and
-  // high-confidence data commands have had a chance to match.
-  const intent = detectFootballIntent(text);
-  if (intent === 'data_ml_ai' || intent === 'ml_ai') {
-    const teams = text.match(/(?:^|\b)(.+?)\s+(?:vs\.?|v\.?|versus|against)\s+(.+?)(?:\s+(?:who will win|who might win|who wins|prediction|analysis|today|tonight|tomorrow|recent form|head to head|h2h|team stats|statistics|stats|injuries|lineups?|squad news))?$/i);
-    if (teams?.[1]?.trim() && teams?.[2]?.trim()) {
-      return { command: 'analyze', args: teams[1].trim() + ' vs ' + teams[2].trim(), raw: text };
-    }
-  }
-
-  if (/\b(football|soccer|match|matches|team|teams|player|players|league|leagues|goal|goals|score|scores|win|draw|lose|lost|won|coach|manager|transfer|tournament|formation|referee|penalt(?:y|ies)|offsides?|corners?|cards?|shots on target|possession|lineups?|injuries|expected goals|xg|both teams to score|btts|double chance|correct score|tactics|transfer news|premier league|champions league)\b/.test(text)) {
-    return { command: 'football_help', args: text, raw: text };
-  }
-
-  const commandMatch = text.match(COMMAND_REGEX);
-  if (commandMatch) {
-    return { command: commandMatch[1], args: commandMatch[2] ? commandMatch[2].trim() : null, raw: text };
-  }
-  return { command: null, args: null, raw: text };
 }
 
-export function parseCommand(input) {
-  return interpretNaturalLanguage(input);
+async function hasActivePremiumSubscription(phone) {
+  const subscriptions = await getUserSubscriptions(phone);
+  return subscriptions.some((subscription) =>
+    String(subscription?.plan ?? '').toLowerCase() === 'premium' && subscription?.is_active !== false
+  );
 }
+
+async function dispatchHeavyAnalysis({ sender, kind, args, provider }) {
+  if (isQueueAvailable()) {
+    try {
+      const result = await addAnalysisJob({ phone: sender, kind, args, provider });
+      if (result.queued) {
+        if (result.deduped) {
+          return '⏳ Your previous analysis request is still running. I will send the result here when it is ready.';
+        }
+        return '⏳ Working on your match analysis now. This can take up to about 30 seconds. I will send the full report in this chat when it is ready.';
+      }
+    } catch (error) {
+      logger.warn({ error, sender, kind }, 'Could not enqueue analysis; running inline');
+    }
+  }
+
+  if (kind === 'tip') return runTipCommand();
+  return runAnalyzeCommand(args);
+}
+
+export { parseCommand, interpretNaturalLanguage } from '../commands/intentParser.js';
 
 export async function processIncomingMessage(input) {
   try {
@@ -132,7 +69,7 @@ export async function processIncomingMessage(input) {
     const { command, args, raw } = parseCommand(payload.message);
 
     await upsertUser({ phone: sender, provider: payload.provider });
-    const prefs = await getUserPreferences(sender);
+    await getUserPreferences(sender);
 
     logger.info(
       { phone: sender, command, args, provider: payload.provider },
@@ -155,6 +92,10 @@ export async function processIncomingMessage(input) {
       case 'upgrade':
         return 'Reply UPGRADE to see Premium plans and payment instructions.';
 
+      case 'leagues':
+      case 'league':
+        return handleLeaguesCommand();
+
       case 'football_help': {
         if (detectFootballIntent(raw) === 'ml_ai') {
           return 'Please include the two teams for a match prediction, for example: Arsenal vs Chelsea, who might win?';
@@ -168,7 +109,12 @@ export async function processIncomingMessage(input) {
 
       case 'tip':
       case 'tips':
-        return await handleTipCommand();
+        return await dispatchHeavyAnalysis({
+          sender,
+          kind: 'tip',
+          args: null,
+          provider: payload.provider
+        });
 
       case 'live':
         return await handleLiveCommand(args);
@@ -185,7 +131,12 @@ export async function processIncomingMessage(input) {
       case 'analyze':
       case 'analysis':
         if (!(await hasActivePremiumSubscription(sender))) return premiumRequiredMessage();
-        return await handleAnalyzeCommand(args);
+        return await dispatchHeavyAnalysis({
+          sender,
+          kind: 'analyze',
+          args,
+          provider: payload.provider
+        });
 
       case 'season':
       case 'historical':
@@ -210,327 +161,4 @@ export async function processIncomingMessage(input) {
   }
 }
 
-async function getFootballAssistantReply(question) {
-  try {
-    return await answerFootballQuestion(question);
-  } catch (error) {
-    logger.warn({ error }, 'Open-ended football AI unavailable; using friendly fallback');
-    return null;
-  }
-}
-
-function getFriendlyFallback() {
-  return '⚽ I’m here to help with football. You can ask about rules, tactics, formations, teams, players, competitions, or statistics. For match data, try FIXTURES, LIVE, TABLE, FORM [TEAM], H2H [TEAM A] vs [TEAM B], or ANALYZE [TEAM A] vs [TEAM B]. For broader football questions, the AI assistant needs to be enabled by configuring OPENAI_API_KEY. What would you like to know?';
-}
-
-function getMenuMessage() {
-  return `🏟️ ELISHA SPORTS BOT
-
-Available commands:
-
-• MENU — show this menu
-• Ask naturally — e.g. “What matches are on today?” or “How is Arsenal doing?”
-• TIP / “Today's tip” — check available fixtures before requesting a match analysis
-• FIXTURES — upcoming matches
-• LIVE — live scores (when available)
-• TABLE — league standings
-• FORM [TEAM] — recent results for a team
-• H2H [TEAM A] vs [TEAM B] — head-to-head stats
-• ANALYZE [TEAM A] vs [TEAM B] — form, squad availability, strength, lineups, and data-quality analysis
-• SEASON [LEAGUE] [YEAR] — historical season summary
-• HELP — usage guide
-• UPGRADE — view Premium plans and payment steps
-• START — enable notifications
-• STOP — disable notifications`;
-}
-
-function getHelpMessage() {
-  return `📖 HELP - How to use ELISHA SPORTS BOT
-
-Examples:
-
-“What matches are on today?”
-  Shows available upcoming fixtures.
-
-“How is Arsenal doing?”
-  Shows Arsenal's recent form.
-
-“Arsenal vs Chelsea, who might win?”
-  Requests detailed analysis (Premium required).
-
-“Today's tip”
-  Checks available fixtures; it will not invent a pick if reliable data is unavailable.
-
-Voice notes
-  Voice-note understanding is planned for a future upgrade. Please type your football question for now.
-
-FIXTURES
-  Shows next 3 upcoming matches.
-
-TABLE
-  Shows league standings (top 5 teams).
-
-FORM Arsenal
-  Shows Arsenal's last 5 matches.
-
-H2H Manchester City vs Liverpool
-  Shows historical head-to-head record.
-
-ANALYZE Arsenal vs Chelsea
-  Compares recent form, head-to-head, squad availability, team strength, lineup context, and data-quality warnings.
-
-SEASON Premier League 2023
-  Summarizes completed fixtures, points, goals, and home/away records for a historical season.
-
-LIVE
-  Shows current live scores (when available).
-
-START / STOP
-  Enable or disable match notifications.
-
-UPGRADE\n  Shows Premium plans and manual payment instructions. Activation requires administrator verification.\n\nReply MENU for all commands.`;
-}
-
-async function handleFixturesCommand(args) {
-  try {
-    const limit = args ? Math.min(parseInt(args) || 3, 10) : 3;
-    const fixtures = await getUpcomingFixtures({ limit, onlyResults: false });
-
-    if (!fixtures || fixtures.length === 0) {
-      return 'No upcoming fixtures available.';
-    }
-
-    const list = fixtures
-      .map((match, idx) => {
-        const time = new Date(match.time).toLocaleDateString('en-US', {
-          month: 'short',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit'
-        });
-        return `${idx + 1}. ${match.home} vs ${match.away}\n   ${time}`;
-      })
-      .join('\n\n');
-
-    return fixtures[0]?.source === 'api-football' ? `📅 UPCOMING FIXTURES\n\n${list}\n\nSource: football data API` : `⚠️ DEMO DATA — not live or official\n\n📅 SAMPLE FIXTURES\n\n${list}`;
-  } catch (error) {
-    logger.error({ error }, 'Error fetching fixtures');
-    return 'Could not fetch fixtures. Please try again.';
-  }
-}
-
-async function handleTipCommand() {
-  try {
-    const fixtures = await getUpcomingFixtures({ limit: 5, onlyResults: false });
-    if (!fixtures || fixtures.length === 0) {
-      return appendBettingDisclaimer('⚽ TODAY’S TIP\n\nI cannot responsibly suggest a match pick because no upcoming fixtures are available from the configured data source. Please try FIXTURES later. I will not invent a match or probability.');
-    }
-    const list = fixtures.map((match, index) => {
-      const time = match.time ? new Date(match.time).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Kickoff time unavailable';
-      return `${index + 1}. ${match.home} vs ${match.away}\n   ${time}`;
-    }).join('\n\n');
-    if (fixtures[0]?.source !== 'api-football') {
-      return appendBettingDisclaimer(`⚽ TODAY’S TIP — FIXTURE CHECK\n\n⚠️ DEMO DATA — these are not verified live fixtures, so I will not run or present an ML prediction for them.\n\n${list}\n\nTry again when verified fixtures are available.`);
-    }
-    const selected = fixtures[0];
-    try {
-      const prediction = await predictFootballMatch({ homeTeam: selected.home, awayTeam: selected.away, kickoff: selected.time ?? null });
-      const mlText = formatMlPrediction(prediction);
-      const aiText = await getFootballAssistantReply(`Explain this ML output using only the supplied values. Do not invent or alter probabilities, statistics, team news, or facts.\n${JSON.stringify({ match_result: prediction.match_result, double_chance: prediction.double_chance, goal_markets: prediction.goal_markets, btts: prediction.btts, expected_goals: prediction.expected_goals, confidence: prediction.confidence, data_quality: prediction.data_quality })}`);
-      return appendBettingDisclaimer(`⚽ TODAY’S ML + AI TIP\n\n${mlText}${aiText ? `\n\n🤖 AI EXPLANATION\n${aiText}` : ''}`);
-    } catch (error) {
-      logger.warn({ error }, 'ML prediction unavailable for today tip');
-      return appendBettingDisclaimer(`⚽ TODAY’S TIP\n\nVerified fixtures are available, but the ML model could not produce a prediction. I will not invent a pick or probability. ${error.message}`);
-    }
-  } catch (error) {
-    logger.error({ error }, 'Error checking fixtures for tip request');
-    return appendBettingDisclaimer('I could not check fixtures for a tip right now. Please try again later. I will not make up a pick or probability.');
-  }
-}
-
-async function handleLiveCommand(args) {
-  try {
-    const liveMatches = await getUpcomingFixtures({ limit: 5, liveOnly: true });
-
-    if (!liveMatches || liveMatches.length === 0) {
-      return 'No live matches at the moment.';
-    }
-
-    const list = liveMatches
-      .map((match) => {
-        const score = match.score ? `${match.score}` : 'LIVE';
-        const status = match.status ?? 'In Progress';
-        return `⚽ ${match.home} ${score} ${match.away}\n   (${status})`;
-      })
-      .join('\n\n');
-
-    return `🔴 LIVE MATCHES\n\n${list}`;
-  } catch (error) {
-    logger.error({ error }, 'Error fetching live scores');
-    return 'Could not fetch live scores. Please try again.';
-  }
-}
-
-async function handleTableCommand(args) {
-  try {
-    const league = args ?? 'Premier League';
-    const table = await getLeagueTable({ league, limit: 5 });
-
-    if (!table || table.length === 0) {
-      return `No standings available for ${league}.`;
-    }
-
-    const list = table
-      .map(
-        (entry) => `${String(entry.position).padStart(2, ' ')}. ${entry.team.padEnd(20)} ${String(entry.points).padStart(2)}pts`
-      )
-      .join('\n');
-
-    return table[0]?.source === 'api-football' ? `📊 LEAGUE TABLE - ${league}\n\n${list}\n\nSource: football data API` : `⚠️ DEMO DATA — not live or official\n\n📊 SAMPLE LEAGUE TABLE - ${league}\n\n${list}`;
-  } catch (error) {
-    logger.error({ error }, 'Error fetching table');
-    return 'Could not fetch standings. Please try again.';
-  }
-}
-
-async function handleFormCommand(args) {
-  if (!args) {
-    return 'Please specify a team. Example: FORM Arsenal';
-  }
-
-  try {
-    const team = args.trim();
-    const form = await getTeamFormStats(team, { limit: 5 });
-
-    if (!form || form.length === 0) {
-      return `No recent form data found for ${team}.`;
-    }
-
-    const results = form
-      .map((match) => {
-        if (match.result === 'W') return '✅ W';
-        if (match.result === 'D') return '⚪ D';
-        if (match.result === 'L') return '❌ L';
-        return '? -';
-      })
-      .join(' ');
-
-    const stats = form[0];
-    const summary = `${stats.wins}W ${stats.draws}D ${stats.losses}L`;
-
-    return `📈 RECENT FORM - ${team}\n\nLast 5: ${results}\n${summary}`;
-  } catch (error) {
-    logger.error({ error }, 'Error fetching form');
-    return `Could not fetch form for ${args}. Please try again.`;
-  }
-}
-
-async function handleH2HCommand(args) {
-  if (!args || !args.includes(' vs ') && !args.includes(' v ')) {
-    return 'Usage: H2H Manchester City vs Liverpool';
-  }
-
-  try {
-    const parts = args.split(/\s+vs?\s+/i);
-    if (parts.length !== 2) {
-      return 'Usage: H2H Manchester City vs Liverpool';
-    }
-
-    const [teamA, teamB] = [parts[0].trim(), parts[1].trim()];
-    const record = await getHeadToHeadRecord(teamA, teamB);
-
-    if (!record) {
-      return `No head-to-head data found for ${teamA} vs ${teamB}.`;
-    }
-
-    return `🏆 HEAD-TO-HEAD: ${teamA} vs ${teamB}\n\n${teamA}: ${record.wins_a} wins\n${teamB}: ${record.wins_b} wins\nDraws: ${record.draws}\n\nLast match: ${record.last_match_date}`;
-  } catch (error) {
-    logger.error({ error }, 'Error fetching H2H');
-    return 'Could not fetch head-to-head data. Please try again.';
-  }
-}
-
-async function handleSeasonCommand(args) {
-  const match = String(args ?? '').trim().match(/^(.*?)(?:\s+)?(20\d{2})$/);
-  if (!match) return 'Usage: SEASON Premier League 2023';
-  const league = match[1].trim() || 'Premier League';
-  const season = Number(match[2]);
-  try {
-    const fixtures = await getHistoricalSeasonFixtures({ league, season });
-    return formatSeasonReport({ league, season, fixtures, limit: 10 });
-  } catch (error) {
-    logger.warn({ error, league, season }, 'Historical season report unavailable');
-    return `Could not load historical data for ${league} ${season}. Check the configured data provider, API key, and historical-season access.`;
-  }
-}
 export default processIncomingMessage;
-
-
-async function handleAnalyzeCommand(args) {
-  if (!args || !/\s+vs?\s+/i.test(args)) return 'Usage: ANALYZE Arsenal vs Chelsea';
-  const parts = args.split(/\s+vs?\s+/i);
-  if (parts.length !== 2 || !parts[0].trim() || !parts[1].trim()) return 'Usage: ANALYZE Arsenal vs Chelsea';
-  const [teamA, teamB] = parts.map((part) => part.trim());
-
-  // ML and contextual data are independent: one failing must not fabricate
-  // values or suppress the other valid result.
-  const [predictionResult, contextResult] = await Promise.allSettled([
-    predictFootballMatch({ homeTeam: teamA, awayTeam: teamB }),
-    getMatchContext(teamA, teamB)
-  ]);
-
-  const prediction = predictionResult.status === 'fulfilled' ? predictionResult.value : null;
-  const context = contextResult.status === 'fulfilled' ? contextResult.value : null;
-  const contextText = context ? formatMatchContext(context) : 'PRE-MATCH SQUAD & TEAM CONTEXT\nContext providers failed or are unavailable; do not infer current injuries, lineups, or team statistics.';
-  const predictionText = prediction ? formatMlPrediction(prediction) : ('ML prediction unavailable: ' + (predictionResult.reason?.message || 'model unavailable'));
-
-  if (!prediction && !context) {
-    logger.warn({ teamA, teamB, predictionError: predictionResult.reason, contextError: contextResult.reason }, 'ML and match context both unavailable');
-    return '⚠️ MATCH ANALYSIS UNAVAILABLE\n\nI could not retrieve a model prediction or match context for ' + teamA + ' vs ' + teamB + '. I will not invent probabilities, injuries, lineups, or statistics. Check the deployed Python runtime, trained models, and configured football-data providers.';
-  }
-
-  let aiText = null;
-  try {
-    aiText = await getFootballAssistantReply([
-      'Explain the supplied football evidence for the user.',
-      'Use only facts and numerical values explicitly supplied below. Do not invent, update, or infer injuries, lineups, team news, recent results, probabilities, or statistics.',
-      'Separate model estimates from retrieved context. Mention unavailable or low-quality data and explain uncertainty.',
-      'Do not claim a forecast is certain.',
-      prediction ? 'MODEL OUTPUT:\n' + JSON.stringify({
-        fixture: prediction.fixture,
-        match_result: prediction.match_result,
-        machine_learning_result: prediction.machine_learning_result,
-        double_chance: prediction.double_chance,
-        goal_markets: prediction.goal_markets,
-        btts: prediction.btts,
-        expected_goals: prediction.expected_goals,
-        correct_score: prediction.correct_score,
-        confidence: prediction.confidence,
-        data_quality: prediction.data_quality,
-        features_used: prediction.features_used,
-        model: prediction.model
-      }) : 'MODEL OUTPUT: unavailable.',
-      'RETRIEVED CONTEXT:\n' + contextText
-    ].join('\n\n'));
-  } catch (error) {
-    logger.warn({ error, teamA, teamB }, 'AI explanation unavailable for match analysis');
-  }
-
-  const partsOut = [
-    '⚽ MATCH ANALYSIS\n' + (prediction ? predictionText : ('⚠️ ML MODEL\n' + predictionText)),
-    context ? ('\n\n📚 DATA & TEAM CONTEXT\n' + contextText) : '\n\n📚 DATA & TEAM CONTEXT\nCurrent context could not be retrieved; no current team-news claims are made.',
-    aiText ? ('\n\n🤖 AI EXPLANATION\n' + aiText) : '\n\nAI explanation is unavailable; showing only successfully retrieved data and model output.'
-  ];
-  return appendBettingDisclaimer(partsOut.join(''));
-}
-
-async function hasActivePremiumSubscription(phone) {
-  const subscriptions = await getUserSubscriptions(phone);
-  return subscriptions.some((subscription) =>
-    String(subscription?.plan ?? '').toLowerCase() === 'premium' && subscription?.is_active !== false
-  );
-}
-
-function premiumRequiredMessage() {
-  return '🔒 PREMIUM FEATURE\n\nDetailed match analysis and historical season reports are available to active Premium subscribers.\n\nSend UPGRADE to view plans and payment instructions. Your access will activate only after an administrator verifies your payment.';
-}
