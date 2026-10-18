@@ -37,6 +37,8 @@ export function interpretNaturalLanguage(input) {
   if (/\b(help|what can you do|how do i use you)\b/.test(text)) {
     return { command: 'help', args: null, raw: text };
   }
+  // Preserve explicit H2H command syntax before the general matchup interpreter.
+  if (/^h2h\\s+/.test(text)) return { command: 'h2h', args: text.replace(/^h2h\\s+/, '').trim(), raw: text };
   if (/\b(today'?s? tips?|tips today|best pick today|today'?s? best pick|give me a tip|football tip today|today tip)\b/.test(text)) {
     return { command: 'tip', args: null, raw: text };
   }
@@ -89,6 +91,12 @@ export function interpretNaturalLanguage(input) {
   }
   if (/\b(upgrade|premium plans?|pricing|subscribe|subscription)\b/.test(text)) {
     return { command: 'upgrade', args: null, raw: text };
+  }
+  const explicitCommand = text.match(COMMAND_REGEX);
+  if (explicitCommand && /^(menu|help|fixtures|live|table|form|h2h|analyze|analysis|season|historical|tip|tips|start|stop)$/.test(explicitCommand[1])) {
+    if (!(explicitCommand[1] === 'form' && /^form of\\s+/.test(text))) {
+      return { command: explicitCommand[1], args: explicitCommand[2] ? explicitCommand[2].trim() : null, raw: text };
+    }
   }
   if (/\b(football|soccer|match|matches|team|teams|player|players|league|leagues|goal|goals|score|scores|win|draw|lose|lost|won|coach|manager|transfer|tournament|formation|referee|penalt(?:y|ies)|offsides?|corners?|cards?|shots on target|possession|lineups?|injuries|expected goals|xg|both teams to score|btts|double chance|correct score|tactics|transfer news|premier league|champions league)\b/.test(text)) {
     return { command: 'football_help', args: text, raw: text };
