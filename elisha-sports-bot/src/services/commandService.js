@@ -38,7 +38,7 @@ export function interpretNaturalLanguage(input) {
     return { command: 'help', args: null, raw: text };
   }
   // Preserve explicit H2H command syntax before the general matchup interpreter.
-  if (/^h2h\\s+/.test(text)) return { command: 'h2h', args: text.replace(/^h2h\\s+/, '').trim(), raw: text };
+  if (/^h2h\s+/.test(text)) return { command: 'h2h', args: text.replace(/^h2h\s+/, '').trim(), raw: text };
   if (/\b(today'?s? tips?|tips today|best pick today|today'?s? best pick|give me a tip|football tip today|today tip)\b/.test(text)) {
     return { command: 'tip', args: null, raw: text };
   }
@@ -94,7 +94,7 @@ export function interpretNaturalLanguage(input) {
   }
   const explicitCommand = text.match(COMMAND_REGEX);
   if (explicitCommand && /^(menu|help|fixtures|live|table|form|h2h|analyze|analysis|season|historical|tip|tips|start|stop)$/.test(explicitCommand[1])) {
-    if (!(explicitCommand[1] === 'form' && /^form of\\s+/.test(text))) {
+    if (!(explicitCommand[1] === 'form' && /^form of\s+/.test(text))) {
       return { command: explicitCommand[1], args: explicitCommand[2] ? explicitCommand[2].trim() : null, raw: text };
     }
   }
