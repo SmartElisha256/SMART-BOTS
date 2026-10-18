@@ -48,8 +48,8 @@ export function interpretNaturalLanguage(input) {
     return { command: 'table', args: league || null, raw: text };
   }
 
-  const matchup = text.match(/(?:^|\b)(?:analyze|analyse|analysis|predict|prediction|who will win|who might win|who wins|tip for|odds for)\s+(?:the\s+)?(.+?)\s+(?:vs\.?|v\.?|versus|against)\s+(.+?)(?:\s+(?:match|game|today|prediction|analysis))?$/);
-  const plainMatchup = text.match(/^(.+?)\s+(?:vs\.?|v\.?|versus|against)\s+(.+?)(?:\s+(?:who will win|who might win|who wins|prediction|analysis|today))?$/);
+  const matchup = text.replace(/[,?!]+/g, ' ').match(/(?:^|\b)(?:analyze|analyse|analysis|predict|prediction|who will win|who might win|who wins|tip for|odds for|what do you think about|compare)\s+(?:the\s+)?(.+?)\s+(?:vs\.?|v\.?|versus|against)\s+(.+?)(?:\s+(?:match|game|today|prediction|analysis))?$/);
+  const plainMatchup = text.replace(/[,?!]+/g, ' ').match(/^(.+?)\s+(?:vs\.?|v\.?|versus|against)\s+(.+?)(?:\s+(?:who will win|who might win|who wins|prediction|analysis|today))?$/);
   const pair = matchup || ((/\b(who will win|who might win|who wins|predict|prediction|analy[sz]e|analysis|h2h|head to head|tip)\b/.test(text)) ? plainMatchup : null);
   if (pair) {
     const teamA = (pair[1] ?? '').trim();
@@ -66,7 +66,7 @@ export function interpretNaturalLanguage(input) {
   }
 
   // Conversational football intents that do not use command syntax.
-  const normalizedQuestion = text.replace(/[?!,]+/g, ' ').replace(/\\s+/g, ' ').trim();
+  const normalizedQuestion = text.replace(/[?!,]+/g, ' ').replace(/\s+/g, ' ').trim();
   const h2hNatural = normalizedQuestion.match(/(?:show|get|give me|check|what is|tell me)? ?(?:the )?(?:h2h|head to head)(?: record| stats| history)? for (.+?) (?:vs|versus|against) (.+)$/);
   if (h2hNatural && h2hNatural[1] && h2hNatural[2]) {
     return { command: 'h2h', args: h2hNatural[1].trim() + ' vs ' + h2hNatural[2].trim(), raw: text };
@@ -75,10 +75,10 @@ export function interpretNaturalLanguage(input) {
   if (formNatural && formNatural[1] && !/^(the team|football|it)$/i.test(formNatural[1])) {
     return { command: 'form', args: formNatural[1].trim(), raw: text };
   }
-  if (/\\b(upgrade|premium plans?|pricing|subscribe|subscription)\\b/.test(text)) {
+  if (/\b(upgrade|premium plans?|pricing|subscribe|subscription)\b/.test(text)) {
     return { command: 'upgrade', args: null, raw: text };
   }
-  if (/\\b(offsides?|corners?|cards?|shots on target|possession|lineups?|injuries|expected goals|xg|both teams to score|btts|double chance|correct score|tactics|transfer news)\\b/.test(text)) {
+  if (/\b(offsides?|corners?|cards?|shots on target|possession|lineups?|injuries|expected goals|xg|both teams to score|btts|double chance|correct score|tactics|transfer news)\b/.test(text)) {
     return { command: 'football_help', args: text, raw: text };
   }
 
