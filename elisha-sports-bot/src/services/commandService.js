@@ -67,6 +67,10 @@ export function interpretNaturalLanguage(input) {
 
   // Conversational football intents that do not use command syntax.
   const normalizedQuestion = text.replace(/[?!,]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const h2hCommandLike = normalizedQuestion.match(/^(?:please )?(?:show|get|give me|check) (?:the )?(?:h2h|head to head)(?: record| stats| history)? (.+?) (?:vs|versus|against) (.+)$/);
+  if (h2hCommandLike && h2hCommandLike[1] && h2hCommandLike[2]) {
+    return { command: 'h2h', args: h2hCommandLike[1].trim() + ' vs ' + h2hCommandLike[2].trim(), raw: text };
+  }
   const h2hNatural = normalizedQuestion.match(/(?:show|get|give me|check|what is|tell me)? ?(?:the )?(?:h2h|head to head)(?: record| stats| history)? for (.+?) (?:vs|versus|against) (.+)$/);
   if (h2hNatural && h2hNatural[1] && h2hNatural[2]) {
     return { command: 'h2h', args: h2hNatural[1].trim() + ' vs ' + h2hNatural[2].trim(), raw: text };
