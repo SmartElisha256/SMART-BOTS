@@ -11,7 +11,7 @@ export function detectFootballIntent(input) {
   const text = String(input ?? '').trim().toLowerCase();
   if (!text) return 'unknown';
 
-  const predictionIntent = /\\b(predict|prediction|predicting|who will win|who might win|who wins|best pick|tips? today|today'?s? tips?|betting|odds|1x2|double chance|over\\s*\\/?\\s*under|btts|both teams to score|correct score|expected goals|xg|probabilit(?:y|ies)|chance of (?:winning|a draw)|match analysis|analy[sz]e .{1,80}\\b(?:vs?\\.?|versus|against)\\b)\\b/i;
+  const conceptQuestion = /\\b(what is|what does|define|meaning of|explain)\\s+(?:an?\\s+)?(?:xg|expected goals|btts|double chance|offside|4-3-3|formation|football tactics)\\b/i;\n  if (conceptQuestion.test(text) && !/\\b(?:vs?\\.?|versus|against|predict|prediction|probabilit|today'?s? tip|betting|odds)\\b/i.test(text)) return 'ai_only';\n\n  const predictionIntent = /\\b(predict|prediction|predicting|who will win|who might win|who wins|best pick|tips? today|today'?s? tips?|betting|odds|1x2|double chance|over\\s*\\/?\\s*under|btts|both teams to score|correct score|expected goals|xg|probabilit(?:y|ies)|chance of (?:winning|a draw)|match analysis|analy[sz]e .{1,80}\\b(?:vs?\\.?|versus|against)\\b)\\b/i;
   const matchup = /\\b.{2,60}\\s+(?:vs?\\.?|versus|against)\\s+.{2,60}\\b/i;
   if (predictionIntent.test(text) || matchup.test(text)) return 'ml_ai';
 
