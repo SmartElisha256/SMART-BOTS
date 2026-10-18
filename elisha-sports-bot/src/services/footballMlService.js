@@ -133,7 +133,7 @@ export function formatMlPrediction(prediction) {
     `BTTS: Yes ${pct(btts.yes)} | No ${pct(btts.no)}`,
     `Expected goals: ${fixture.home_team ?? 'Home'} ${Number(xg.home).toFixed(2)} - ${Number(xg.away).toFixed(2)} ${fixture.away_team ?? 'Away'}`,
     `Top correct-score estimates: ${scores.slice(0, 3).map(item => `${item.score} (${pct(item.probability)})`).join(', ') || 'unavailable'}`,
-    `Confidence: ${prediction.confidence?.level ?? 'unavailable'}; historical matches: ${prediction.data_quality?.historical_matches ?? 'unknown'}`
+    `Confidence: ${prediction.confidence?.level ?? 'unavailable'}; historical matches: ${prediction.data_quality?.historical_matches ?? 'unknown'}`,\n    `Historical data range: ${prediction.data_quality?.history_date_range?.from ?? 'unknown'} to ${prediction.data_quality?.history_date_range?.to ?? 'unknown'}`,\n    `Model features: ${(prediction.features_used?.model_features ?? []).join(', ') || 'not reported'}`,\n    `Player data used by ML model: ${prediction.features_used?.player_data_in_model === true ? 'yes' : 'no — checked separately in team context'}`
   ];
   if (warnings.length) lines.push('', `Data warnings: ${warnings.join(' ')}`);
   lines.push('', 'These are model estimates, not guarantees. Do not treat them as certain outcomes.');
