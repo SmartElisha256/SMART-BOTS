@@ -8,7 +8,8 @@ import {
   getKampalaDate,
   getNextKampalaMidnight,
   formatQuotaLimitMessage,
-  claimQuotaNotice
+  claimQuotaNotice,
+  isWithinFreePremiumAccessWindow
 } from '../src/services/usageService.js';
 
 test('tracks football-data commands but not help or preference commands', () => {
@@ -69,4 +70,13 @@ test('quota notices are claimed only once per user and quota period', async () =
   assert.equal(await claimQuotaNotice(phone, 'day'), false);
   assert.equal(await claimQuotaNotice(phone, 'month'), true);
   assert.equal(await claimQuotaNotice(phone, 'month'), false);
+});
+
+test('Premium preview covers the first half of the free daily quota', () => {
+  assert.equal(isWithinFreePremiumAccessWindow(1, 20), true);
+  assert.equal(isWithinFreePremiumAccessWindow(10, 20), true);
+  assert.equal(isWithinFreePremiumAccessWindow(11, 20), false);
+  assert.equal(isWithinFreePremiumAccessWindow(5, 10), true);
+  assert.equal(isWithinFreePremiumAccessWindow(6, 10), false);
+  assert.equal(isWithinFreePremiumAccessWindow(0, 1), false);
 });
