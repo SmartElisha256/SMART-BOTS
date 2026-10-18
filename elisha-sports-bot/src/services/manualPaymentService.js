@@ -11,7 +11,7 @@ export const PREMIUM_PLANS = Object.freeze({
 });
 
 export function isPaymentCommand(message) {
-  return /^(premium|upgrade|pay|payment|approve|reject)(?:\s|$)/i.test(String(message ?? '').trim());
+  return /^(premium|upgrade|pay|payment|approve|reject|setplan|changeplan)(?:\s|$)/i.test(String(message ?? '').trim());
 }
 export function getAdminPhones() {
   return String(env.PAYMENT_ADMIN_PHONES ?? '').split(',').map((phone) => phone.trim().replace(/[^0-9]/g, '')).filter(Boolean);
@@ -116,7 +116,7 @@ export async function submitPaymentProof({ phone, transactionId, planKey }) {
 
   const existing = [...memoryPayments.values()].find((item) => item.transactionId === id);
   if (existing) return existing.phone === phone
-    ? 'Transaction ID already received. Reference: ' + existing.id + '. Status: ' + existing.status + '.'
+    ? 'Transaction ID already received. Reference: ' + existing.id + '. Saved plan: ' + planKeyForDuration(existing.durationDays).toUpperCase() + ' (' + existing.durationDays + ' day(s)), expected UGX ' + Number(existing.amountUgx).toLocaleString('en-UG') + '. Status: ' + existing.status + '.'
     : 'That transaction ID has already been submitted. Contact the administrator if needed.';
   const payment = { id: memoryPayments.size + 1, phone, transactionId: id, amountUgx: plan.price, durationDays: plan.durationDays, planLabel: plan.label, status: 'pending' };
   memoryPayments.set(payment.id, payment);
@@ -187,8 +187,10 @@ export async function handlePaymentCommand({ phone, message }) {
     const parts = args.split(/\s+/).filter(Boolean);
     if (!parts.length) return 'Submit your transaction ID with a plan: PAY DAY TRANSACTION_ID, PAY WEEK TRANSACTION_ID, or PAY MONTH TRANSACTION_ID.';
     const first = parts[0].toLowerCase();
-    const planKey = ['day', 'week', 'month'].includes(first) ? first : 'week';
-    const transactionId = ['day', 'week', 'month'].includes(first) ? parts.slice(1).join(' ') : args;
+    const hasPlan = ['day', 'week', 'month'].includes(first);
+    if (!hasPlan) return 'Please specify the plan explicitly: PAY DAY TRANSACTION_ID, PAY WEEK TRANSACTION_ID, or PAY MONTH TRANSACTION_ID. No plan is assumed.';
+    const planKey = first;
+    const transactionId = parts.slice(1).join(' ');
     return submitPaymentProof({ phone, transactionId, planKey });
   }
   if (/^(setplan|changeplan)$/i.test(command)) {
