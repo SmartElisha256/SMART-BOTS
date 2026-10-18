@@ -7,6 +7,7 @@ import { formatSeasonReport } from './historicalSeasonService.js';
 import { analyzeMatch } from './analysisService.js';
 import { getMatchContext, formatMatchContext } from './fixtureContextService.js';
 import { logger } from '../utils/logger.js';
+import { answerFootballQuestion } from './footballAssistantService.js';
 
 const commandRequestSchema = z.object({
   sender: z.string().min(5),
@@ -128,7 +129,9 @@ export async function processIncomingMessage(input) {
     );
 
     if (!command) {
-      return `I’m not sure what you mean yet. You can ask naturally, for example:\n• “What matches are on today?”\n• “How is Arsenal doing?”\n• “Arsenal vs Chelsea, who might win?”\n• “Today's tip”\n\nReply MENU to see everything I can do.`;
+      const aiReply = await getFootballAssistantReply(raw);
+      if (aiReply) return aiReply;
+      return getFriendlyFallback();
     }
 
     switch (command) {
@@ -141,8 +144,10 @@ export async function processIncomingMessage(input) {
       case 'upgrade':
         return 'Reply UPGRADE to see Premium plans and payment instructions.';
 
-      case 'football_help':
-        return '⚽ I can help with fixtures, live scores, league tables, team form, head-to-head records, and available match analysis. Detailed corners, cards, player statistics, injuries, lineups, xG, and individual betting markets depend on connected data and may not be available yet. Tell me the teams or match you mean. I will not invent statistics or probabilities.';
+      case 'football_help': {
+        const aiReply = await getFootballAssistantReply(raw);
+        return aiReply || getFriendlyFallback();
+      }
 
       case 'fixtures':
         return await handleFixturesCommand(args);
@@ -189,6 +194,19 @@ export async function processIncomingMessage(input) {
     logger.error({ error }, 'Error processing incoming message');
     return 'An error occurred. Please try again later.';
   }
+}
+
+async function getFootballAssistantReply(question) {
+  try {
+    return await answerFootballQuestion(question);
+  } catch (error) {
+    logger.warn({ error }, 'Open-ended football AI unavailable; using friendly fallback');
+    return null;
+  }
+}
+
+function getFriendlyFallback() {
+  return '⚽ I’m here to help with football. You can ask about rules, tactics, formations, teams, players, competitions, or statistics. For match data, try FIXTURES, LIVE, TABLE, FORM [TEAM], H2H [TEAM A] vs [TEAM B], or ANALYZE [TEAM A] vs [TEAM B]. For broader football questions, the AI assistant needs to be enabled by configuring OPENAI_API_KEY. What would you like to know?';
 }
 
 function getMenuMessage() {
