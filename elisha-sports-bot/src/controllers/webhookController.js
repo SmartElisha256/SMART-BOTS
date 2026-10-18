@@ -4,7 +4,7 @@ import { logger } from '../utils/logger.js';
 import { createMessagingAdapter } from '../providers/messaging/factory.js';
 import { processIncomingMessage } from '../services/commandService.js';
 import { checkAndConsumeDailyRequest, recordOutgoingMessage, formatQuotaLimitMessage, claimQuotaNotice } from '../services/usageService.js';
-import { handlePaymentCommand, isPaymentCommand, getAdminPhones, getPaymentRequestByReference } from '../services/manualPaymentService.js';
+import { handlePaymentCommand, isPaymentCommand, isPaymentAdmin, getAdminPhones, getPaymentRequestByReference } from '../services/manualPaymentService.js';
 
 function safeEqualText(left, right) {
   const a = Buffer.from(String(left ?? ''));
@@ -59,7 +59,11 @@ export async function handleIncomingWebhook(req, res) {
     for (const message of messages) {
       let reply;
       let paymentNotification = null;
-      if (isPaymentCommand(message.text)) {
+      const adminControlCommand = /^(approve|reject|setplan|changeplan|pending|pendingpayments|payments)(?:\s|$)/i.test(message.text);
+      if (isPaymentAdmin(message.sender) && !adminControlCommand) {
+        // Keep the personal admin number out of customer sports flows and quotas.
+        reply = '🔐 This number is reserved for payment alerts and admin controls. Use the customer-facing bot number for sports features. Admin commands: PENDING, APPROVE REF, REJECT REF, SETPLAN REF DAY|WEEK|MONTH.';
+      } else if (isPaymentCommand(message.text)) {
         reply = await handlePaymentCommand({ phone: message.sender, message: message.text });
         if (reply.startsWith('✅ Transaction ID received. Reference: ')) {
           const ref = reply.match(/Reference:\s*(\d+)/);
