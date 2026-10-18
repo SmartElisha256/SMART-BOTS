@@ -79,9 +79,10 @@ export function getCommandName(message) {
 }
 
 export function isQuotaTrackedMessage(message) {
-  return QUOTA_TRACKED_COMMANDS.has(getCommandName(message));
+  // Every non-empty customer message can invoke the AI fallback, so count it
+  // against the daily quota rather than only counting uppercase commands.
+  return String(message ?? '').trim().length > 0;
 }
-
 export function getDailyRequestLimit(plan = 'free') {
   return plan === 'premium'
     ? env.PREMIUM_DAILY_REQUEST_LIMIT
