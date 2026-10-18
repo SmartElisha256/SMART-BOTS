@@ -5,6 +5,7 @@ import { getUserSubscriptions, subscribeUser, unsubscribeUser } from './subscrip
 import { getUpcomingFixtures, getLeagueTable, getTeamFormStats, getHeadToHeadRecord, getHistoricalSeasonFixtures } from './sportsService.js';
 import { formatSeasonReport } from './historicalSeasonService.js';
 import { analyzeMatch } from './analysisService.js';
+import { getMatchContext, formatMatchContext } from './fixtureContextService.js';
 import { logger } from '../utils/logger.js';
 
 const commandRequestSchema = z.object({
@@ -107,7 +108,7 @@ Available commands:
 • TABLE — league standings
 • FORM [TEAM] — recent results for a team
 • H2H [TEAM A] vs [TEAM B] — head-to-head stats
-• ANALYZE [TEAM A] vs [TEAM B] — recent-statistics analysis
+• ANALYZE [TEAM A] vs [TEAM B] — form, squad availability, strength, lineups, and data-quality analysis
 • SEASON [LEAGUE] [YEAR] — historical season summary
 • HELP — usage guide
 • UPGRADE — view Premium plans and payment steps
@@ -133,7 +134,7 @@ H2H Manchester City vs Liverpool
   Shows historical head-to-head record.
 
 ANALYZE Arsenal vs Chelsea
-  Compares recent form and head-to-head data; AI analysis is optional.
+  Compares recent form, head-to-head, squad availability, team strength, lineup context, and data-quality warnings.
 
 SEASON Premier League 2023
   Summarizes completed fixtures, points, goals, and home/away records for a historical season.
@@ -303,12 +304,13 @@ async function handleAnalyzeCommand(args) {
   }
   const [teamA, teamB] = parts.map((part) => part.trim());
   try {
-    const [formA, formB, h2h] = await Promise.all([
+    const [formA, formB, h2h, context] = await Promise.all([
       getTeamFormStats(teamA, { limit: 5 }),
       getTeamFormStats(teamB, { limit: 5 }),
-      getHeadToHeadRecord(teamA, teamB)
+      getHeadToHeadRecord(teamA, teamB),
+      getMatchContext(teamA, teamB).catch((error) => ({ dataQuality: { status: 'partial', warnings: [error.message] } }))
     ]);
-    return await analyzeMatch({ teamA, teamB, formA, formB, h2h });
+    return await analyzeMatch({ teamA, teamB, formA, formB, h2h, matchContext: context ? formatMatchContext(context) : null });
   } catch (error) {
     logger.error({ error, teamA, teamB }, 'Error analyzing match');
     return 'I could not analyze that match because the sports data service failed. Please try again later.';

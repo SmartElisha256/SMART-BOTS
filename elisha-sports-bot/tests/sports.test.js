@@ -17,3 +17,17 @@ test('returns ranked standings table', async () => {
   assert.ok(table[0].team);
   assert.ok(typeof table[0].points === 'number');
 });
+
+
+test('match context services return explicit support status', async () => {
+  const { getPlayerAvailability } = await import('../src/services/availabilityService.js');
+  const { getLineupContext } = await import('../src/services/lineupService.js');
+  const { getTeamStrength } = await import('../src/services/teamStrengthService.js');
+  const availability = await getPlayerAvailability('Arsenal');
+  const lineups = await getLineupContext('Arsenal', 'Chelsea');
+  const strength = await getTeamStrength('Arsenal');
+  assert.equal(typeof availability.status, 'string');
+  assert.equal(typeof lineups.status, 'string');
+  assert.equal(typeof strength.status, 'string');
+  if (availability.status === 'unsupported') assert.match(availability.note, /does not supply/i);
+});

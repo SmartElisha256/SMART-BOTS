@@ -14,7 +14,7 @@ function summarizeForm(form = []) {
   };
 }
 
-function fallbackAnalysis(teamA, teamB, formA, formB, h2h) {
+function fallbackAnalysis(teamA, teamB, formA, formB, h2h, matchContext = null) {
   const a = summarizeForm(formA);
   const b = summarizeForm(formB);
   const lines = [`📊 MATCH ANALYSIS: ${teamA} vs ${teamB}`];
@@ -28,13 +28,17 @@ function fallbackAnalysis(teamA, teamB, formA, formB, h2h) {
     lines.push('\nHead-to-head record is unavailable.');
   }
   if (!a && !b && (!h2h || !h2h.matches)) {
-    return 'I cannot analyze this match yet because reliable form and head-to-head data are unavailable. Configure a real sports-data provider first.';
+    lines.push('\nReliable form and head-to-head data are unavailable. Treat any conclusions as incomplete.');
+    if (matchContext) lines.push(`\n${matchContext}`);
+    lines.push('\nAssessment: missing records are not evidence of player availability or team strength.');
+    return lines.join('\n');
   }
-  lines.push('\nAssessment: these statistics describe recent performance only; they do not guarantee the match result. No probability is shown because there is not enough validated data for a calibrated forecast.');
+  if (matchContext) lines.push(`\n${matchContext}`);
+  lines.push('\nAssessment: these statistics describe recent performance only; they do not guarantee the match result. Missing squad information is not proof of full availability.');
   return lines.join('\n');
 }
 
-async function askAI({ teamA, teamB, formA, formB, h2h }) {
+async function askAI({ teamA, teamB, formA, formB, h2h, matchContext }) {
   if (!env.OPENAI_API_KEY) return null;
   const response = await fetch(`${env.OPENAI_BASE_URL.replace(/\/$/, '')}/responses`, {
     method: 'POST',
@@ -48,11 +52,11 @@ async function askAI({ teamA, teamB, formA, formB, h2h }) {
       input: [
         {
           role: 'system',
-          content: 'You are a cautious football statistics analyst. Use only the supplied data. Never invent injuries, lineups, odds, live events, tactics, or statistics. State when information is missing. Explain strengths, risks, and uncertainty in concise WhatsApp-friendly text. Do not guarantee outcomes or present betting as certain.'
+          content: 'You are a cautious football statistics analyst. Use only the supplied data. Never invent injuries, lineups, odds, live events, tactics, or statistics. State when information is missing. Explain strengths, risks, squad availability, team strength, and uncertainty in concise WhatsApp-friendly text. Distinguish verified facts from missing information. Do not infer a player is fit from an empty injury list. Never invent tactics or formations. Do not guarantee outcomes.'
         },
         {
           role: 'user',
-          content: JSON.stringify({ match: { teamA, teamB }, recentForm: { [teamA]: formA, [teamB]: formB }, headToHead: h2h })
+          content: JSON.stringify({ match: { teamA, teamB }, recentForm: { [teamA]: formA, [teamB]: formB }, headToHead: h2h, matchContext })
         }
       ],
       max_output_tokens: 450
@@ -64,11 +68,11 @@ async function askAI({ teamA, teamB, formA, formB, h2h }) {
   return text || null;
 }
 
-export async function analyzeMatch({ teamA, teamB, formA = [], formB = [], h2h = null }) {
-  const deterministic = fallbackAnalysis(teamA, teamB, formA, formB, h2h);
+export async function analyzeMatch({ teamA, teamB, formA = [], formB = [], h2h = null, matchContext = null }) {
+  const deterministic = fallbackAnalysis(teamA, teamB, formA, formB, h2h, matchContext);
   if (!env.OPENAI_API_KEY || deterministic.startsWith('I cannot analyze')) return deterministic;
   try {
-    const aiText = await askAI({ teamA, teamB, formA, formB, h2h });
+    const aiText = await askAI({ teamA, teamB, formA, formB, h2h, matchContext });
     return aiText ? `🤖 AI MATCH ANALYSIS\n\n${aiText}\n\nData-based analysis, not a guaranteed result.` : deterministic;
   } catch {
     return `${deterministic}\n\n(AI service unavailable; showing the statistics summary instead.)`;
