@@ -16,19 +16,101 @@ const commandRequestSchema = z.object({
 
 const COMMAND_REGEX = /^([a-z0-9]+)(?:\s+(.+))?$/i;
 
-export function parseCommand(input) {
-  const normalized = String(input).trim().toLowerCase();
-  const match = normalized.match(COMMAND_REGEX);
+const BETTING_DISCLAIMER = 'Disclaimer: This statistical analysis is intended for adults aged 18 and above. Gambling can be psychologically harmful and can lead to financial loss. Tips are derived from statistical analysis, not certainty. Use any tips responsibly and stake only what you can afford to lose.';
+function appendBettingDisclaimer(message) { return `${message}\n\n${BETTING_DISCLAIMER}`; }
 
-  if (!match) {
-    return { command: null, args: null, raw: normalized };
+/**
+ * Translate common conversational messages into the bot's existing commands.
+ * This is a lightweight, deterministic intent matcher (no paid AI call), not
+ * an unrestricted chatbot. It must not invent sports facts or predictions.
+ */
+export function interpretNaturalLanguage(input) {
+  const text = String(input ?? '').trim().toLowerCase()
+    .replace(/[’‘]/g, "'")
+    .replace(/[?!.,]+$/g, '')
+    .replace(/\s+/g, ' ');
+
+  if (!text) return { command: null, args: null, raw: text };
+  if (/^(hi|hello|hey|good morning|good afternoon|good evening)\b/.test(text)) {
+    return { command: 'menu', args: null, raw: text };
+  }
+  if (/\b(help|what can you do|how do i use you)\b/.test(text)) {
+    return { command: 'help', args: null, raw: text };
+  }
+  // Preserve explicit H2H command syntax before the general matchup interpreter.
+  if (/^h2h\s+/.test(text)) return { command: 'h2h', args: text.replace(/^h2h\s+/, '').trim(), raw: text };
+  if (/\b(today'?s? tips?|tips today|best pick today|today'?s? best pick|give me a tip|football tip today|today tip)\b/.test(text)) {
+    return { command: 'tip', args: null, raw: text };
+  }
+  if (/\b(live scores?|scores? right now|matches live|what'?s live)\b/.test(text)) {
+    return { command: 'live', args: null, raw: text };
+  }
+  if (/\b(fixtures?|matches today|games today|upcoming matches|what matches are on|who is playing today)\b/.test(text)) {
+    return { command: 'fixtures', args: null, raw: text };
+  }
+  if (/\b(league table|standings|table for|show the table)\b/.test(text)) {
+    const league = text.match(/(?:table for|standings for) (.+)$/)?.[1];
+    return { command: 'table', args: league || null, raw: text };
   }
 
-  return {
-    command: match[1],
-    args: match[2] ? match[2].trim() : null,
-    raw: normalized
-  };
+  const earlyH2H = text.replace(/[?!,]+/g, ' ').match(/^(?:please )?(?:show|get|give me|check) (?:the )?(?:h2h|head to head)(?: record| stats| history)? (.+?) (?:vs|versus|against) (.+)$/);
+  if (earlyH2H && earlyH2H[1] && earlyH2H[2]) return { command: 'h2h', args: earlyH2H[1].trim() + ' vs ' + earlyH2H[2].trim(), raw: text };
+
+  const naturalH2HQuestion = text.replace(/[?!,]+/g, ' ').match(/^(?:what is|what's|tell me|please show|show|get|give me|check) (?:the )?(?:h2h|head to head)(?: record| stats| history)?(?: for)? (.+?) (?:vs|versus|against) (.+)$/);
+  if (naturalH2HQuestion && naturalH2HQuestion[1] && naturalH2HQuestion[2]) return { command: 'h2h', args: naturalH2HQuestion[1].trim() + ' vs ' + naturalH2HQuestion[2].trim(), raw: text };
+  const matchup = text.replace(/[,?!]+/g, ' ').match(/(?:^|\b)(?:please )?(?:analyze|analyse|analysis|predict|prediction|who will win|who might win|who wins|tip for|odds for|what do you think about|compare)\s+(?:the\s+)?(.+?)\s+(?:vs\.?|v\.?|versus|against)\s+(.+?)(?:\s+(?:match|game|today|prediction|analysis))?$/);
+  const plainMatchup = text.replace(/[,?!]+/g, ' ').match(/^(.+?)\s+(?:vs\.?|v\.?|versus|against)\s+(.+?)(?:\s+(?:who will win|who might win|who wins|prediction|analysis|today))?$/);
+  const pair = matchup || ((/\b(who will win|who might win|who wins|predict|prediction|analy[sz]e|analysis|h2h|head to head|tip)\b/.test(text)) ? plainMatchup : null);
+  if (pair) {
+    const teamA = (pair[1] ?? '').trim();
+    const teamB = (pair[2] ?? '').trim().replace(/[, ]+$/g, '');
+    if (teamA && teamB) {
+      const command = /\b(h2h|head to head)\b/.test(text) ? 'h2h' : 'analyze';
+      return { command, args: `${teamA} vs ${teamB}`, raw: text };
+    }
+  }
+
+  const formMatch = text.match(/^(?:how is|how's|how are|tell me about|show me the form of|form of|recent form for)\s+(.+?)(?:\s+doing)?$/);
+  if (formMatch?.[1] && !/^(the team|football|it)$/i.test(formMatch[1])) {
+    return { command: 'form', args: formMatch[1].trim(), raw: text };
+  }
+
+  // Conversational football intents that do not use command syntax.
+  const normalizedQuestion = text.replace(/[?!,]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const h2hCommandLike = normalizedQuestion.match(/^(?:please )?(?:show|get|give me|check) (?:the )?(?:h2h|head to head)(?: record| stats| history)? (.+?) (?:vs|versus|against) (.+)$/);
+  if (h2hCommandLike && h2hCommandLike[1] && h2hCommandLike[2]) {
+    return { command: 'h2h', args: h2hCommandLike[1].trim() + ' vs ' + h2hCommandLike[2].trim(), raw: text };
+  }
+  const h2hNatural = normalizedQuestion.match(/(?:show|get|give me|check|what is|tell me)? ?(?:the )?(?:h2h|head to head)(?: record| stats| history)? for (.+?) (?:vs|versus|against) (.+)$/);
+  if (h2hNatural && h2hNatural[1] && h2hNatural[2]) {
+    return { command: 'h2h', args: h2hNatural[1].trim() + ' vs ' + h2hNatural[2].trim(), raw: text };
+  }
+  const formNatural = normalizedQuestion.match(/^(?:how is|how's|how are|tell me about|show me the form of|form of|recent form for|recent results for) (.+?)(?: doing)?$/);
+  if (formNatural && formNatural[1] && !/^(the team|football|it)$/i.test(formNatural[1])) {
+    return { command: 'form', args: formNatural[1].trim(), raw: text };
+  }
+  if (/\b(upgrade|premium plans?|pricing|subscribe|subscription)\b/.test(text)) {
+    return { command: 'upgrade', args: null, raw: text };
+  }
+  const explicitCommand = text.match(COMMAND_REGEX);
+  if (explicitCommand && /^(menu|help|fixtures|live|table|form|h2h|analyze|analysis|season|historical|tip|tips|start|stop)$/.test(explicitCommand[1])) {
+    if (!(explicitCommand[1] === 'form' && /^form of\s+/.test(text))) {
+      return { command: explicitCommand[1], args: explicitCommand[2] ? explicitCommand[2].trim() : null, raw: text };
+    }
+  }
+  if (/\b(football|soccer|match|matches|team|teams|player|players|league|leagues|goal|goals|score|scores|win|draw|lose|lost|won|coach|manager|transfer|tournament|formation|referee|penalt(?:y|ies)|offsides?|corners?|cards?|shots on target|possession|lineups?|injuries|expected goals|xg|both teams to score|btts|double chance|correct score|tactics|transfer news|premier league|champions league)\b/.test(text)) {
+    return { command: 'football_help', args: text, raw: text };
+  }
+
+  const commandMatch = text.match(COMMAND_REGEX);
+  if (commandMatch) {
+    return { command: commandMatch[1], args: commandMatch[2] ? commandMatch[2].trim() : null, raw: text };
+  }
+  return { command: null, args: null, raw: text };
+}
+
+export function parseCommand(input) {
+  return interpretNaturalLanguage(input);
 }
 
 export async function processIncomingMessage(input) {
@@ -46,7 +128,7 @@ export async function processIncomingMessage(input) {
     );
 
     if (!command) {
-      return getHelpMessage();
+      return `I’m not sure what you mean yet. You can ask naturally, for example:\n• “What matches are on today?”\n• “How is Arsenal doing?”\n• “Arsenal vs Chelsea, who might win?”\n• “Today's tip”\n\nReply MENU to see everything I can do.`;
     }
 
     switch (command) {
@@ -56,8 +138,18 @@ export async function processIncomingMessage(input) {
       case 'help':
         return getHelpMessage();
 
+      case 'upgrade':
+        return 'Reply UPGRADE to see Premium plans and payment instructions.';
+
+      case 'football_help':
+        return '⚽ I can help with fixtures, live scores, league tables, team form, head-to-head records, and available match analysis. Detailed corners, cards, player statistics, injuries, lineups, xG, and individual betting markets depend on connected data and may not be available yet. Tell me the teams or match you mean. I will not invent statistics or probabilities.';
+
       case 'fixtures':
         return await handleFixturesCommand(args);
+
+      case 'tip':
+      case 'tips':
+        return await handleTipCommand();
 
       case 'live':
         return await handleLiveCommand(args);
@@ -105,6 +197,8 @@ function getMenuMessage() {
 Available commands:
 
 • MENU — show this menu
+• Ask naturally — e.g. “What matches are on today?” or “How is Arsenal doing?”
+• TIP / “Today's tip” — check available fixtures before requesting a match analysis
 • FIXTURES — upcoming matches
 • LIVE — live scores (when available)
 • TABLE — league standings
@@ -122,6 +216,21 @@ function getHelpMessage() {
   return `📖 HELP - How to use ELISHA SPORTS BOT
 
 Examples:
+
+“What matches are on today?”
+  Shows available upcoming fixtures.
+
+“How is Arsenal doing?”
+  Shows Arsenal's recent form.
+
+“Arsenal vs Chelsea, who might win?”
+  Requests detailed analysis (Premium required).
+
+“Today's tip”
+  Checks available fixtures; it will not invent a pick if reliable data is unavailable.
+
+Voice notes
+  Voice-note understanding is planned for a future upgrade. Please type your football question for now.
 
 FIXTURES
   Shows next 3 upcoming matches.
@@ -175,6 +284,24 @@ async function handleFixturesCommand(args) {
   } catch (error) {
     logger.error({ error }, 'Error fetching fixtures');
     return 'Could not fetch fixtures. Please try again.';
+  }
+}
+
+async function handleTipCommand() {
+  try {
+    const fixtures = await getUpcomingFixtures({ limit: 5, onlyResults: false });
+    if (!fixtures || fixtures.length === 0) {
+      return appendBettingDisclaimer('⚽ TODAY’S TIP\n\nI cannot responsibly suggest a match pick because no upcoming fixtures are available from the configured data source. Please try FIXTURES later. I will not invent a match or probability.');
+    }
+    const list = fixtures.map((match, index) => {
+      const time = match.time ? new Date(match.time).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Kickoff time unavailable';
+      return `${index + 1}. ${match.home} vs ${match.away}\n   ${time}`;
+    }).join('\n\n');
+    const demo = fixtures[0]?.source !== 'api-football';
+    return appendBettingDisclaimer(`⚽ TODAY’S TIP — FIXTURE CHECK\n\n${demo ? '⚠️ DEMO DATA — these are not verified live fixtures, so no pick or probability is provided.\n\n' : ''}${list}\n\nReply “ANALYZE Team A vs Team B” with a match you want assessed. Detailed analysis may require Premium.\n\nAny analysis is uncertain and is not a guarantee of a result.`);
+  } catch (error) {
+    logger.error({ error }, 'Error checking fixtures for tip request');
+    return appendBettingDisclaimer('I could not check fixtures for a tip right now. Please try again later. I will not make up a pick or probability.');
   }
 }
 
@@ -312,10 +439,11 @@ async function handleAnalyzeCommand(args) {
       getHeadToHeadRecord(teamA, teamB),
       getMatchContext(teamA, teamB).catch((error) => ({ dataQuality: { status: 'partial', warnings: [error.message] } }))
     ]);
-    return await analyzeMatch({ teamA, teamB, formA, formB, h2h, matchContext: context ? formatMatchContext(context) : null });
+    const analysis = await analyzeMatch({ teamA, teamB, formA, formB, h2h, matchContext: context ? formatMatchContext(context) : null });
+    return appendBettingDisclaimer(analysis);
   } catch (error) {
     logger.error({ error, teamA, teamB }, 'Error analyzing match');
-    return 'I could not analyze that match because the sports data service failed. Please try again later.';
+    return appendBettingDisclaimer('I could not analyze that match because the sports data service failed. Please try again later.');
   }
 }
 
