@@ -74,7 +74,6 @@ router.post('/predict', (req, res) => {
       res.status(502).json({ ok: false, error: 'Prediction output exceeded the allowed size.' });
     }
   });
-  child.stderr.setEncoding('utf8');
   child.stderr.on('data', (chunk) => { stderr += chunk.slice(0, 4000); });
   child.on('error', (error) => {
     if (finished) return;
