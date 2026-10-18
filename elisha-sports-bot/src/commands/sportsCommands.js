@@ -1,14 +1,34 @@
 import { getUpcomingFixtures, getLeagueTable, getTeamFormStats, getHeadToHeadRecord, getHistoricalSeasonFixtures } from '../services/sportsService.js';
 import { formatSeasonReport } from '../services/historicalSeasonService.js';
+import { normalizeLeagueName, listSupportedLeagueAliases } from '../utils/leagueAliases.js';
 import { logger } from '../utils/logger.js';
 
 export async function handleFixturesCommand(args) {
   try {
-    const limit = args ? Math.min(parseInt(args) || 3, 10) : 3;
-    const fixtures = await getUpcomingFixtures({ limit, onlyResults: false });
+    const raw = String(args ?? '').trim();
+    let limit = 3;
+    let league = 'Premier League';
+
+    if (raw) {
+      const asNum = parseInt(raw, 10);
+      if (String(asNum) === raw && asNum >= 1) {
+        limit = Math.min(asNum, 10);
+      } else {
+        // e.g. "La Liga" or "5 La Liga"
+        const m = raw.match(/^(\d+)\s+(.+)$/);
+        if (m) {
+          limit = Math.min(parseInt(m[1], 10) || 3, 10);
+          league = normalizeLeagueName(m[2]);
+        } else {
+          league = normalizeLeagueName(raw);
+        }
+      }
+    }
+
+    const fixtures = await getUpcomingFixtures({ limit, onlyResults: false, league });
 
     if (!fixtures || fixtures.length === 0) {
-      return 'No upcoming fixtures available.';
+      return `No upcoming fixtures available for ${league}.`;
     }
 
     const list = fixtures
@@ -24,17 +44,22 @@ export async function handleFixturesCommand(args) {
       .join('\n\n');
 
     return fixtures[0]?.source === 'api-football'
-      ? `📅 UPCOMING FIXTURES\n\n${list}\n\nSource: football data API`
-      : `⚠️ DEMO DATA — not live or official\n\n📅 SAMPLE FIXTURES\n\n${list}`;
+      ? `📅 UPCOMING FIXTURES — ${league}\n\n${list}\n\nSource: football data API`
+      : `⚠️ DEMO DATA — not live or official\n\n📅 SAMPLE FIXTURES — ${league}\n\n${list}`;
   } catch (error) {
     logger.error({ error }, 'Error fetching fixtures');
     return 'Could not fetch fixtures. Please try again.';
   }
 }
 
-export async function handleLiveCommand() {
+export async function handleLiveCommand(args) {
   try {
-    const liveMatches = await getUpcomingFixtures({ limit: 5, liveOnly: true });
+    const league = args ? normalizeLeagueName(args) : undefined;
+    const liveMatches = await getUpcomingFixtures({
+      limit: 5,
+      liveOnly: true,
+      league: league || 'Premier League'
+    });
 
     if (!liveMatches || liveMatches.length === 0) {
       return 'No live matches at the moment.';
@@ -57,11 +82,11 @@ export async function handleLiveCommand() {
 
 export async function handleTableCommand(args) {
   try {
-    const league = args ?? 'Premier League';
+    const league = normalizeLeagueName(args ?? 'Premier League');
     const table = await getLeagueTable({ league, limit: 5 });
 
     if (!table || table.length === 0) {
-      return `No standings available for ${league}.`;
+      return `No standings available for ${league}. Try TABLE La Liga, TABLE Serie A, or TABLE Bundesliga.`;
     }
 
     const list = table
@@ -137,9 +162,12 @@ export async function handleH2HCommand(args) {
 }
 
 export async function handleSeasonCommand(args) {
-  const match = String(args ?? '').trim().match(/^(.*?)(?:\s+)?(20\d{2})$/);
-  if (!match) return 'Usage: SEASON Premier League 2023';
-  const league = match[1].trim() || 'Premier League';
+  const text = String(args ?? '').trim();
+  const match = text.match(/^(.*?)(?:\s+)?(20\d{2})$/);
+  if (!match) {
+    return 'Usage: SEASON Premier League 2023  (also: SEASON La Liga 2024, SEASON Serie A 2022)';
+  }
+  const league = normalizeLeagueName(match[1].trim() || 'Premier League');
   const season = Number(match[2]);
   try {
     const fixtures = await getHistoricalSeasonFixtures({ league, season });
@@ -148,4 +176,9 @@ export async function handleSeasonCommand(args) {
     logger.warn({ error, league, season }, 'Historical season report unavailable');
     return `Could not load historical data for ${league} ${season}. Check the configured data provider, API key, and historical-season access.`;
   }
+}
+
+export function handleLeaguesCommand() {
+  const leagues = listSupportedLeagueAliases();
+  return `🌍 SUPPORTED LEAGUE ALIASES\n\n${leagues.map((n) => '• ' + n).join('\n')}\n\nExamples:\nTABLE La Liga\nFIXTURES Bundesliga\nSEASON Serie A 2023`;
 }

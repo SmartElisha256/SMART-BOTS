@@ -39,7 +39,6 @@ const envSchema = z.object({
   FREE_DAILY_REQUEST_LIMIT: z.coerce.number().int().positive().default(20),
   PREMIUM_DAILY_REQUEST_LIMIT: z.coerce.number().int().positive().default(200),
   PREMIUM_MONTHLY_REQUEST_LIMIT: z.coerce.number().int().positive().default(300),
-  // Manual payments only; no payment gateway or automatic debit is used.
   PREMIUM_PRICE_UGX: z.coerce.number().int().nonnegative().default(5000),
   PREMIUM_PRICE_DAY_UGX: z.coerce.number().int().positive().default(1000),
   PREMIUM_PRICE_WEEK_UGX: z.coerce.number().int().positive().default(5000),
@@ -47,7 +46,9 @@ const envSchema = z.object({
   MOMO_NETWORK: z.string().default(''),
   MOMO_MERCHANT_CODE: z.string().default('SET_YOUR_MERCHANT_CODE'),
   MOMO_MERCHANT_NAME: z.string().default(''),
-  PAYMENT_ADMIN_PHONES: z.string().default('')
+  PAYMENT_ADMIN_PHONES: z.string().default(''),
+  // Private web admin dashboard (/admin). Required to use the dashboard.
+  ADMIN_API_KEY: z.string().default('replace-me')
 });
 
 export const env = envSchema.parse(process.env);
@@ -103,6 +104,7 @@ export function validateEnvironment() {
     sportsDataProvider: env.SPORTS_DATA_PROVIDER,
     sportsApiConfigured: Boolean(env.SPORTS_API_KEY),
     aiAnalysisConfigured: Boolean(env.OPENAI_API_KEY),
+    adminDashboardConfigured: !isPlaceholder(env.ADMIN_API_KEY),
     dailyRequestLimits: {
       free: env.FREE_DAILY_REQUEST_LIMIT,
       premium: env.PREMIUM_DAILY_REQUEST_LIMIT,
