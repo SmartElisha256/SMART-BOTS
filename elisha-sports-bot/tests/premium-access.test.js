@@ -15,47 +15,12 @@ const [
   import('../src/services/subscriptionService.js')
 ]);
 
-test('new free users receive a limited Premium analysis trial but not historical reports', async () => {
-  const sender = '256700000010';
-  const first = await processIncomingMessage({
-    sender,
-    message: 'ANALYZE Arsenal vs Chelsea',
-    provider: 'mock'
-  });
-  assert.match(first, /NEW USER PREMIUM TRIAL/);
-  assert.match(first, /2 trial analysis request\(s\) remaining/);
-
-  const second = await processIncomingMessage({
-    sender,
-    message: 'ANALYZE Arsenal vs Chelsea',
-    provider: 'mock'
-  });
-  assert.match(second, /NEW USER PREMIUM TRIAL/);
-  assert.match(second, /1 trial analysis request\(s\) remaining/);
-
-  const third = await processIncomingMessage({
-    sender,
-    message: 'ANALYZE Arsenal vs Chelsea',
-    provider: 'mock'
-  });
-  assert.match(third, /NEW USER PREMIUM TRIAL/);
-  assert.match(third, /used all your trial analyses/);
-
-  const fourth = await processIncomingMessage({
-    sender,
-    message: 'ANALYZE Arsenal vs Chelsea',
-    provider: 'mock'
-  });
-  assert.match(fourth, /used all its included match analyses/);
-  assert.match(fourth, /UPGRADE/);
-
-  const season = await processIncomingMessage({
-    sender: '256700000011',
-    message: 'SEASON Premier League 2025',
-    provider: 'mock'
-  });
-  assert.match(season, /PREMIUM FEATURE/);
-  assert.match(season, /UPGRADE/);
+test('free users can access every Premium feature during the preview window', async () => {
+  const analysis = await processIncomingMessage({ sender: '256700000010', message: 'ANALYZE Arsenal vs Chelsea', provider: 'mock' });
+  assert.doesNotMatch(analysis, /PREMIUM FEATURE/);
+  assert.match(analysis, /MATCH ANALYSIS|AI MATCH ANALYSIS|could not analyze/i);
+  const season = await processIncomingMessage({ sender: '256700000011', message: 'SEASON Premier League 2025', provider: 'mock' });
+  assert.doesNotMatch(season, /PREMIUM FEATURE/);
 });
 
 test('active Premium subscriber can access the analysis command', async () => {
