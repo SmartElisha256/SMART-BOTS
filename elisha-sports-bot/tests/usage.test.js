@@ -9,7 +9,9 @@ import {
   getNextKampalaMidnight,
   formatQuotaLimitMessage,
   claimQuotaNotice,
-  isWithinFreePremiumAccessWindow
+  isWithinFreePremiumAccessWindow,
+  checkAndConsumeDailyRequest,
+  canAccessPremiumFeaturesDuringFreeWindow
 } from '../src/services/usageService.js';
 
 test('tracks football-data commands but not help or preference commands', () => {
@@ -79,4 +81,16 @@ test('Premium preview covers the first half of the free daily quota', () => {
   assert.equal(isWithinFreePremiumAccessWindow(5, 10), true);
   assert.equal(isWithinFreePremiumAccessWindow(6, 10), false);
   assert.equal(isWithinFreePremiumAccessWindow(0, 1), false);
+});
+
+test('free user gets Premium commands through request 10 but not request 11 of a 20-request allowance', async () => {
+  const phone = 'test-premium-preview-' + Date.now();
+  for (let i = 0; i < 10; i += 1) {
+    const quota = await checkAndConsumeDailyRequest(phone, 'FIXTURES');
+    assert.equal(quota.allowed, true);
+  }
+  assert.equal(await canAccessPremiumFeaturesDuringFreeWindow(phone), true);
+  const eleventh = await checkAndConsumeDailyRequest(phone, 'FIXTURES');
+  assert.equal(eleventh.allowed, true);
+  assert.equal(await canAccessPremiumFeaturesDuringFreeWindow(phone), false);
 });
