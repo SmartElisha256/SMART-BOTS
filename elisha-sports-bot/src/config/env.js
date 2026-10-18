@@ -39,6 +39,8 @@ const envSchema = z.object({
   FREE_DAILY_REQUEST_LIMIT: z.coerce.number().int().positive().default(20),
   PREMIUM_DAILY_REQUEST_LIMIT: z.coerce.number().int().positive().default(200),
   PREMIUM_MONTHLY_REQUEST_LIMIT: z.coerce.number().int().positive().default(300),
+  NEW_USER_TRIAL_HOURS: z.coerce.number().int().positive().default(24),
+  NEW_USER_TRIAL_ANALYSIS_LIMIT: z.coerce.number().int().positive().default(3),
   // Manual payments only; no payment gateway or automatic debit is used.
   PREMIUM_PRICE_UGX: z.coerce.number().int().nonnegative().default(5000),
   PREMIUM_PRICE_DAY_UGX: z.coerce.number().int().positive().default(1000),
