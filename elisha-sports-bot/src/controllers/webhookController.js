@@ -62,7 +62,18 @@ export async function handleIncomingWebhook(req, res) {
       let paymentNotification = null;
       const adminControlCommand = /^(approve|reject|setplan|changeplan|pending|pendingpayments|payments)(?:\s|$)/i.test(message.text);
       if (message.type === 'audio') {
-        reply = '🎙️ Thanks for the voice note! I cannot understand voice notes yet. Voice-message understanding is planned for a future upgrade. For now, please type your football question, for example: “What matches are on today?” or “Arsenal vs Chelsea, who might win?”';
+        if (isPaymentAdmin(message.sender)) {
+          reply = '🔐 This number is reserved for payment alerts and admin controls. Use the customer-facing bot number for sports features.';
+        } else {
+          const quota = await checkAndConsumeDailyRequest(message.sender, '[voice note]');
+          if (!quota.allowed) {
+            const period = quota.period === 'month' ? 'month' : 'day';
+            if (!(await claimQuotaNotice(message.sender, period))) continue;
+            reply = formatQuotaLimitMessage(quota);
+          } else {
+            reply = '🎙️ Thanks for the voice note! I cannot understand voice notes yet. Voice-message understanding is planned for a future upgrade. For now, please type your football question, for example: “What matches are on today?” or “Arsenal vs Chelsea, who might win?”';
+          }
+        }
         await provider.sendMessage({ to: message.sender, text: reply });
         try { await recordOutgoingMessage(message.sender); }
         catch (usageError) { logger.warn({ error: usageError, phone: message.sender }, 'Could not record outgoing message usage'); }
