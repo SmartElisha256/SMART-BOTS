@@ -468,7 +468,7 @@ async function handleAnalyzeCommand(args) {
     return appendBettingDisclaimer(`${mlText}${aiText ? `\n\n🤖 AI EXPLANATION\n${aiText}` : '\n\nAI explanation is unavailable; showing the ML output only.'}`);
   } catch (error) {
     logger.warn({ error, teamA, teamB }, 'ML prediction unavailable for match');
-    return appendBettingDisclaimer(`⚠️ ML + AI PREDICTION UNAVAILABLE\n\nI could not produce a model-based prediction for ${teamA} vs ${teamB}. I will not replace missing model output with invented probabilities. ${error.message}\n\nCheck that Python dependencies and trained model files are available on the deployed server.`);
+    return appendBettingDisclaimer(`⚠️ MATCH ANALYSIS — ML + AI PREDICTION UNAVAILABLE\n\nI could not produce a model-based prediction for ${teamA} vs ${teamB}. I will not replace missing model output with invented probabilities. ${error.message}\n\nCheck that Python dependencies and trained model files are available on the deployed server.`);
   }
 }
 
