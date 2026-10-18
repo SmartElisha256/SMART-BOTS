@@ -8,7 +8,7 @@ process.env.PAYMENT_ADMIN_PHONES = '256700000001';
 const [
   { processIncomingMessage },
   { submitPaymentProof, approvePayment, rejectPayment },
-  { getUserSubscriptions, isSubscriptionActive }
+  { getUserSubscriptions, isSubscriptionActive, subscribeUser }
 ] = await Promise.all([
   import('../src/services/commandService.js'),
   import('../src/services/manualPaymentService.js'),
@@ -30,6 +30,18 @@ test('free users are blocked from Premium analysis and historical reports', asyn
     provider: 'mock'
   });
   assert.match(season, /PREMIUM FEATURE/);
+});
+
+test('active Premium subscriber can access the analysis command', async () => {
+  const sender = '256700000015';
+  await subscribeUser({ phone: sender, plan: 'premium', durationDays: 7 });
+  const response = await processIncomingMessage({
+    sender,
+    message: 'ANALYZE Arsenal vs Chelsea',
+    provider: 'mock'
+  });
+  assert.doesNotMatch(response, /PREMIUM FEATURE/);
+  assert.match(response, /MATCH ANALYSIS|AI MATCH ANALYSIS|could not analyze/i);
 });
 
 test('payment transaction stays pending and does not activate access before approval', async () => {
