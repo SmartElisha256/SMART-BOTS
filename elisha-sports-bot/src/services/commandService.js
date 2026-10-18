@@ -16,19 +16,64 @@ const commandRequestSchema = z.object({
 
 const COMMAND_REGEX = /^([a-z0-9]+)(?:\s+(.+))?$/i;
 
-export function parseCommand(input) {
-  const normalized = String(input).trim().toLowerCase();
-  const match = normalized.match(COMMAND_REGEX);
+/**
+ * Translate common conversational messages into the bot's existing commands.
+ * This is a lightweight, deterministic intent matcher (no paid AI call), not
+ * an unrestricted chatbot. It must not invent sports facts or predictions.
+ */
+export function interpretNaturalLanguage(input) {
+  const text = String(input ?? '').trim().toLowerCase()
+    .replace(/[’‘]/g, "'")
+    .replace(/[?!.,]+$/g, '')
+    .replace(/\s+/g, ' ');
 
-  if (!match) {
-    return { command: null, args: null, raw: normalized };
+  if (!text) return { command: null, args: null, raw: text };
+  if (/^(hi|hello|hey|good morning|good afternoon|good evening)\b/.test(text)) {
+    return { command: 'menu', args: null, raw: text };
+  }
+  if (/\b(help|what can you do|how do i use you)\b/.test(text)) {
+    return { command: 'help', args: null, raw: text };
+  }
+  if (/\b(today'?s? tips?|tips today|best pick today|today'?s? best pick|give me a tip|football tip today|today tip)\b/.test(text)) {
+    return { command: 'tip', args: null, raw: text };
+  }
+  if (/\b(live scores?|scores? right now|matches live|what'?s live)\b/.test(text)) {
+    return { command: 'live', args: null, raw: text };
+  }
+  if (/\b(fixtures?|matches today|games today|upcoming matches|what matches are on|who is playing today)\b/.test(text)) {
+    return { command: 'fixtures', args: null, raw: text };
+  }
+  if (/\b(league table|standings|table for|show the table)\b/.test(text)) {
+    const league = text.match(/(?:table for|standings for) (.+)$/)?.[1];
+    return { command: 'table', args: league || null, raw: text };
   }
 
-  return {
-    command: match[1],
-    args: match[2] ? match[2].trim() : null,
-    raw: normalized
-  };
+  const matchup = text.match(/(?:^|\b)(?:analyze|analyse|analysis|predict|prediction|who will win|who wins|tip for|odds for)\s+(?:the\s+)?(.+?)\s+(?:vs\.?|v\.?|versus|against)\s+(.+?)(?:\s+(?:match|game|today|prediction|analysis))?$/);
+  const plainMatchup = text.match(/^(.+?)\s+(?:vs\.?|v\.?|versus|against)\s+(.+?)(?:\s+(?:who will win|prediction|analysis|today))?$/);
+  const pair = matchup || ((/\b(who will win|predict|prediction|analy[sz]e|analysis|h2h|head to head|tip)\b/.test(text)) ? plainMatchup : null);
+  if (pair) {
+    const teamA = (pair[1] ?? '').trim();
+    const teamB = (pair[2] ?? '').trim();
+    if (teamA && teamB) {
+      const command = /\b(h2h|head to head)\b/.test(text) ? 'h2h' : 'analyze';
+      return { command, args: `${teamA} vs ${teamB}`, raw: text };
+    }
+  }
+
+  const formMatch = text.match(/^(?:how is|how's|how are|tell me about|show me the form of|form of|recent form for)\s+(.+?)(?:\s+doing)?$/);
+  if (formMatch?.[1] && !/^(the team|football|it)$/i.test(formMatch[1])) {
+    return { command: 'form', args: formMatch[1].trim(), raw: text };
+  }
+
+  const commandMatch = text.match(COMMAND_REGEX);
+  if (commandMatch) {
+    return { command: commandMatch[1], args: commandMatch[2] ? commandMatch[2].trim() : null, raw: text };
+  }
+  return { command: null, args: null, raw: text };
+}
+
+export function parseCommand(input) {
+  return interpretNaturalLanguage(input);
 }
 
 export async function processIncomingMessage(input) {
@@ -46,7 +91,7 @@ export async function processIncomingMessage(input) {
     );
 
     if (!command) {
-      return getHelpMessage();
+      return `I’m not sure what you mean yet. You can ask naturally, for example:\n• “What matches are on today?”\n• “How is Arsenal doing?”\n• “Arsenal vs Chelsea, who might win?”\n• “Today's tip”\n\nReply MENU to see everything I can do.`;
     }
 
     switch (command) {
@@ -58,6 +103,10 @@ export async function processIncomingMessage(input) {
 
       case 'fixtures':
         return await handleFixturesCommand(args);
+
+      case 'tip':
+      case 'tips':
+        return await handleTipCommand();
 
       case 'live':
         return await handleLiveCommand(args);
@@ -105,6 +154,8 @@ function getMenuMessage() {
 Available commands:
 
 • MENU — show this menu
+• Ask naturally — e.g. “What matches are on today?” or “How is Arsenal doing?”
+• TIP / “Today's tip” — check available fixtures before requesting a match analysis
 • FIXTURES — upcoming matches
 • LIVE — live scores (when available)
 • TABLE — league standings
@@ -122,6 +173,18 @@ function getHelpMessage() {
   return `📖 HELP - How to use ELISHA SPORTS BOT
 
 Examples:
+
+“What matches are on today?”
+  Shows available upcoming fixtures.
+
+“How is Arsenal doing?”
+  Shows Arsenal's recent form.
+
+“Arsenal vs Chelsea, who might win?”
+  Requests detailed analysis (Premium required).
+
+“Today's tip”
+  Checks available fixtures; it will not invent a pick if reliable data is unavailable.
 
 FIXTURES
   Shows next 3 upcoming matches.
@@ -175,6 +238,24 @@ async function handleFixturesCommand(args) {
   } catch (error) {
     logger.error({ error }, 'Error fetching fixtures');
     return 'Could not fetch fixtures. Please try again.';
+  }
+}
+
+async function handleTipCommand() {
+  try {
+    const fixtures = await getUpcomingFixtures({ limit: 5, onlyResults: false });
+    if (!fixtures || fixtures.length === 0) {
+      return '⚽ TODAY’S TIP\n\nI cannot responsibly suggest a match pick because no upcoming fixtures are available from the configured data source. Please try FIXTURES later. I will not invent a match or probability.';
+    }
+    const list = fixtures.map((match, index) => {
+      const time = match.time ? new Date(match.time).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Kickoff time unavailable';
+      return `${index + 1}. ${match.home} vs ${match.away}\n   ${time}`;
+    }).join('\n\n');
+    const demo = fixtures[0]?.source !== 'api-football';
+    return `⚽ TODAY’S TIP — FIXTURE CHECK\n\n${demo ? '⚠️ DEMO DATA — these are not verified live fixtures, so no pick or probability is provided.\n\n' : ''}${list}\n\nReply “ANALYZE Team A vs Team B” with a match you want assessed. Detailed analysis may require Premium.\n\nAny analysis is uncertain and is not a guarantee of a result.`;
+  } catch (error) {
+    logger.error({ error }, 'Error checking fixtures for tip request');
+    return 'I could not check fixtures for a tip right now. Please try again later. I will not make up a pick or probability.';
   }
 }
 
