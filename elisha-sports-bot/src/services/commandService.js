@@ -13,7 +13,8 @@ import {
   handleTableCommand,
   handleFormCommand,
   handleH2HCommand,
-  handleSeasonCommand
+  handleSeasonCommand,
+  handleLeaguesCommand
 } from '../commands/sportsCommands.js';
 import { runAnalyzeCommand, runTipCommand } from '../commands/analyzeCommand.js';
 import { addAnalysisJob, isQueueAvailable } from '../jobs/queue.js';
@@ -40,10 +41,6 @@ async function hasActivePremiumSubscription(phone) {
   );
 }
 
-/**
- * Heavy analysis: prefer BullMQ so the WhatsApp webhook returns quickly.
- * Falls back to in-request execution when Redis is unavailable.
- */
 async function dispatchHeavyAnalysis({ sender, kind, args, provider }) {
   if (isQueueAvailable()) {
     try {
@@ -94,6 +91,10 @@ export async function processIncomingMessage(input) {
 
       case 'upgrade':
         return 'Reply UPGRADE to see Premium plans and payment instructions.';
+
+      case 'leagues':
+      case 'league':
+        return handleLeaguesCommand();
 
       case 'football_help': {
         if (detectFootballIntent(raw) === 'ml_ai') {
