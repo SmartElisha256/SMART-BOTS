@@ -48,9 +48,9 @@ export function interpretNaturalLanguage(input) {
     return { command: 'table', args: league || null, raw: text };
   }
 
-  const matchup = text.match(/(?:^|\b)(?:analyze|analyse|analysis|predict|prediction|who will win|who wins|tip for|odds for)\s+(?:the\s+)?(.+?)\s+(?:vs\.?|v\.?|versus|against)\s+(.+?)(?:\s+(?:match|game|today|prediction|analysis))?$/);
+  const matchup = text.match(/(?:^|\b)(?:analyze|analyse|analysis|predict|prediction|who will win|who might win|who wins|tip for|odds for)\s+(?:the\s+)?(.+?)\s+(?:vs\.?|v\.?|versus|against)\s+(.+?)(?:\s+(?:match|game|today|prediction|analysis))?$/);
   const plainMatchup = text.match(/^(.+?)\s+(?:vs\.?|v\.?|versus|against)\s+(.+?)(?:\s+(?:who will win|prediction|analysis|today))?$/);
-  const pair = matchup || ((/\b(who will win|predict|prediction|analy[sz]e|analysis|h2h|head to head|tip)\b/.test(text)) ? plainMatchup : null);
+  const pair = matchup || ((/\b(who will win|who might win|who wins|predict|prediction|analy[sz]e|analysis|h2h|head to head|tip)\b/.test(text)) ? plainMatchup : null);
   if (pair) {
     const teamA = (pair[1] ?? '').trim();
     const teamB = (pair[2] ?? '').trim();
