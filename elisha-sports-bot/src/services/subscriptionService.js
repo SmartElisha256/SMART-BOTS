@@ -15,8 +15,7 @@ export function isSubscriptionActive(subscription, now = Date.now()) {
 
 export async function getUserSubscriptions(phone) {
   if (!pool) {
-    const now = Date.now();
-    return (inMemorySubscriptions.get(phone) ?? []).filter((entry) => isSubscriptionActive(entry, now));
+    return (inMemorySubscriptions.get(phone) ?? []).filter((entry) => isSubscriptionActive(entry));
   }
   const result = await pool.query(
     'SELECT * FROM subscriptions WHERE phone = $1 AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())',
