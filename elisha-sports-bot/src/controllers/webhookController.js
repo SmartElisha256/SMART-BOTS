@@ -4,7 +4,7 @@ import { logger } from '../utils/logger.js';
 import { createMessagingAdapter } from '../providers/messaging/factory.js';
 import { processIncomingMessage } from '../services/commandService.js';
 import { checkAndConsumeDailyRequest, recordOutgoingMessage, formatQuotaLimitMessage, claimQuotaNotice } from '../services/usageService.js';
-import { handlePaymentCommand, isPaymentCommand, getAdminPhones } from '../services/manualPaymentService.js';
+import { handlePaymentCommand, isPaymentCommand, getAdminPhones, getPaymentRequestByReference } from '../services/manualPaymentService.js';
 
 function safeEqualText(left, right) {
   const a = Buffer.from(String(left ?? ''));
@@ -63,12 +63,20 @@ export async function handleIncomingWebhook(req, res) {
         reply = await handlePaymentCommand({ phone: message.sender, message: message.text });
         if (reply.startsWith('✅ Transaction ID received. Reference: ')) {
           const ref = reply.match(/Reference:\s*(\d+)/);
-          const tx = message.text.match(/^PAY\s+(?:(DAY|WEEK|MONTH)\s+)?(.+)$/i);
-          const planKey = tx?.[1]?.toLowerCase() || 'week';
-          const price = planKey === 'day' ? env.PREMIUM_PRICE_DAY_UGX : planKey === 'month' ? env.PREMIUM_PRICE_MONTH_UGX : (env.PREMIUM_PRICE_WEEK_UGX ?? env.PREMIUM_PRICE_UGX);
-          const durationDays = planKey === 'day' ? 1 : planKey === 'month' ? 30 : 7;
-          const planLabel = planKey === 'day' ? 'DAY (1 day)' : planKey === 'month' ? 'MONTH (30 days)' : 'WEEK (7 days)';
-          if (ref) paymentNotification = { reference: ref[1], transactionId: tx?.[2]?.trim(), amount: price, planLabel, durationDays };
+          if (ref) {
+            // Always build the admin alert from the saved payment record, not by
+            // re-parsing customer text; this keeps plan, amount and duration aligned.
+            const savedPayment = await getPaymentRequestByReference(ref[1]);
+            if (savedPayment) {
+              paymentNotification = {
+                reference: String(savedPayment.id),
+                transactionId: savedPayment.transactionId,
+                amount: savedPayment.amountUgx,
+                planLabel: savedPayment.planKey.toUpperCase() + ' (' + savedPayment.durationDays + ' day(s))',
+                durationDays: savedPayment.durationDays
+              };
+            }
+          }
         }
       } else {
         const quota = await checkAndConsumeDailyRequest(message.sender, message.text);
