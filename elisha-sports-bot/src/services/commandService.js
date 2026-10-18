@@ -515,7 +515,7 @@ async function handleAnalyzeCommand(args) {
   }
 
   const partsOut = [
-    prediction ? predictionText : ('⚠️ ML MODEL\n' + predictionText),
+    '⚽ MATCH ANALYSIS\n' + (prediction ? predictionText : ('⚠️ ML MODEL\n' + predictionText)),
     context ? ('\n\n📚 DATA & TEAM CONTEXT\n' + contextText) : '\n\n📚 DATA & TEAM CONTEXT\nCurrent context could not be retrieved; no current team-news claims are made.',
     aiText ? ('\n\n🤖 AI EXPLANATION\n' + aiText) : '\n\nAI explanation is unavailable; showing only successfully retrieved data and model output.'
   ];
