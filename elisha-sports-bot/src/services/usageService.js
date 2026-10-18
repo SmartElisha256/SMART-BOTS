@@ -113,6 +113,29 @@ export function getNextKampalaMidnight(now = new Date()) {
   return new Date(Date.UTC(year, month - 1, day + 1) - (3 * 60 * 60 * 1000));
 }
 
+/** Free users may use all Premium-only commands during the first half of their daily free allowance. */
+export function isWithinFreePremiumAccessWindow(used, freeDailyLimit = env.FREE_DAILY_REQUEST_LIMIT) {
+  const threshold = Math.floor(freeDailyLimit / 2);
+  return threshold > 0 && Number(used) <= threshold;
+}
+
+export async function canAccessPremiumFeaturesDuringFreeWindow(phone) {
+  const subscriptions = await getUserSubscriptions(phone);
+  if (subscriptions.some(isPremiumSubscription)) return true;
+  const threshold = Math.floor(env.FREE_DAILY_REQUEST_LIMIT / 2);
+  if (threshold < 1) return false;
+  if (!pool) {
+    const key = String(phone) + ':' + getKampalaDate();
+    const used = inMemoryUsage.get(key)?.requestsUsed ?? 0;
+    return isWithinFreePremiumAccessWindow(used, env.FREE_DAILY_REQUEST_LIMIT);
+  }
+  const result = await pool.query(
+    `SELECT requests_used FROM daily_usage WHERE phone = $1 AND usage_date = (NOW() AT TIME ZONE 'Africa/Kampala')::date LIMIT 1`,
+    [phone]
+  );
+  return isWithinFreePremiumAccessWindow(Number(result.rows[0]?.requests_used ?? 0), env.FREE_DAILY_REQUEST_LIMIT);
+}
+
 function isPremiumSubscription(subscription) {
   return String(subscription?.plan ?? '').toLowerCase() === 'premium' && subscription?.is_active !== false;
 }
