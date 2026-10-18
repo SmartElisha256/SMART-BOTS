@@ -5,6 +5,7 @@ from collections import defaultdict, deque
 from pathlib import Path
 import joblib
 import numpy as np
+import pandas as pd
 from features import FEATURES, load_matches, team_form, _features_for, _record, STAT_METRICS
 
 def poisson_pmf(k: int, rate: float) -> float:
@@ -38,6 +39,8 @@ def predict(payload: dict, data_path="data/epl_historical.csv", models_dir="mode
     if not all(path.exists() for path in needed):
         raise FileNotFoundError("Models are not trained. Run prepare_epl_data.py, then train.py --data data/epl_historical.csv")
     result_artifact = joblib.load(needed[0])
+    if result_artifact.get("features") and result_artifact["features"] != list(FEATURES):
+        raise ValueError("Model artifacts use an older feature schema. Re-run prepare_epl_data.py and train.py, then restart the service.")
     home_model, away_model = joblib.load(needed[1]), joblib.load(needed[2])
     if cutoff is not None and result_artifact.get("trained_until"):
         model_cutoff = np.datetime64(str(result_artifact["trained_until"]).replace("Z", ""))
@@ -122,5 +125,4 @@ def main():
         print(json.dumps({"error": str(exc)})); sys.exit(1)
 
 if __name__ == "__main__":
-    import pandas as pd
     main()
