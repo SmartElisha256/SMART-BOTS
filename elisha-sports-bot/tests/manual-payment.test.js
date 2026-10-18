@@ -63,7 +63,7 @@ test('only admin can correct a pending payment plan', async () => {
 
 test('pending payment queue is admin-only and groups requests by page', async () => {
   const submitted = await handlePaymentCommand({ phone: '256700000030', message: 'PAY WEEK QUEUETEST12345' });
-  const reference = submitted.match(/Reference: (\\d+)/)?.[1];
+  const reference = submitted.match(/Reference: (\d+)/)?.[1];
   assert.ok(reference, submitted);
 
   const denied = await handlePaymentCommand({ phone: '256700000030', message: 'PENDING' });
