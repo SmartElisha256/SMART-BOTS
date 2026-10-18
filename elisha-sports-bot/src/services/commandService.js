@@ -7,7 +7,7 @@ import { formatSeasonReport } from './historicalSeasonService.js';
 import { analyzeMatch } from './analysisService.js';
 import { getMatchContext, formatMatchContext } from './fixtureContextService.js';
 import { logger } from '../utils/logger.js';
-import { claimPremiumTrialRequest } from './premiumTrialService.js';
+import { canAccessPremiumFeaturesDuringFreeWindow } from './usageService.js';
 
 const commandRequestSchema = z.object({
   sender: z.string().min(5),
@@ -73,23 +73,14 @@ export async function processIncomingMessage(input) {
         return await handleH2HCommand(args);
 
       case 'analyze':
-      case 'analysis': {
-        if (await hasActivePremiumSubscription(sender)) return await handleAnalyzeCommand(args);
-        if (!args || !/\\s+vs?\\s+/i.test(args)) return await handleAnalyzeCommand(args);
-        const trial = await claimPremiumTrialRequest(sender);
-        if (!trial.allowed) return premiumRequiredMessage(trial.reason);
-        const analysis = await handleAnalyzeCommand(args);
-        const remainingText = trial.remaining > 0
-          ? `You have ${trial.remaining} trial analysis request(s) remaining.`
-          : 'You have used all your trial analyses. Upgrade to keep using detailed analysis.';
-        return `🆓 NEW USER PREMIUM TRIAL\\nYou are using one of your first-day Premium match analyses. ${remainingText}\\n\\n${analysis}`;
-      }
+      case 'analysis':
+        if (!(await canAccessPremiumFeaturesDuringFreeWindow(sender))) return premiumRequiredMessage();
+        return await handleAnalyzeCommand(args);
 
       case 'season':
       case 'historical':
-        if (!(await hasActivePremiumSubscription(sender))) return premiumRequiredMessage();
+        if (!(await canAccessPremiumFeaturesDuringFreeWindow(sender))) return premiumRequiredMessage();
         return await handleSeasonCommand(args);
-
       case 'start':
         await updateUserPreferences(sender, { notifications_enabled: true });
         return 'Notifications enabled. You will now receive match alerts.';
@@ -329,13 +320,6 @@ async function handleAnalyzeCommand(args) {
 }
 
 
-async function hasActivePremiumSubscription(phone) {
-  const subscriptions = await getUserSubscriptions(phone);
-  return subscriptions.some((subscription) =>
-    String(subscription?.plan ?? '').toLowerCase() === 'premium' && subscription?.is_active !== false
-  );
-}
-
 function premiumRequiredMessage() {
-  return '🔒 PREMIUM FEATURE\n\nDetailed match analysis and historical season reports are available to active Premium subscribers.\n\nSend UPGRADE to view plans and payment instructions. Your access will activate only after an administrator verifies your payment.';
+  return '🔒 PREMIUM FEATURE\n\nDetailed match analysis and historical season reports are available to Premium subscribers. Free users can preview all Premium features during the first half of their daily free request allowance.\n\nSend UPGRADE to view plans and payment instructions. Your access will activate only after an administrator verifies your payment.';
 }
