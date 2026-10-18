@@ -15,14 +15,39 @@ const [
   import('../src/services/subscriptionService.js')
 ]);
 
-test('free users are blocked from Premium analysis and historical reports', async () => {
-  const analysis = await processIncomingMessage({
-    sender: '256700000010',
+test('new free users receive a limited Premium analysis trial but not historical reports', async () => {
+  const sender = '256700000010';
+  const first = await processIncomingMessage({
+    sender,
     message: 'ANALYZE Arsenal vs Chelsea',
     provider: 'mock'
   });
-  assert.match(analysis, /PREMIUM FEATURE/);
-  assert.match(analysis, /UPGRADE/);
+  assert.match(first, /NEW USER PREMIUM TRIAL/);
+  assert.match(first, /2 trial analysis request\(s\) remaining/);
+
+  const second = await processIncomingMessage({
+    sender,
+    message: 'ANALYZE Arsenal vs Chelsea',
+    provider: 'mock'
+  });
+  assert.match(second, /NEW USER PREMIUM TRIAL/);
+  assert.match(second, /1 trial analysis request\(s\) remaining/);
+
+  const third = await processIncomingMessage({
+    sender,
+    message: 'ANALYZE Arsenal vs Chelsea',
+    provider: 'mock'
+  });
+  assert.match(third, /NEW USER PREMIUM TRIAL/);
+  assert.match(third, /used all your trial analyses/);
+
+  const fourth = await processIncomingMessage({
+    sender,
+    message: 'ANALYZE Arsenal vs Chelsea',
+    provider: 'mock'
+  });
+  assert.match(fourth, /used all its included match analyses/);
+  assert.match(fourth, /UPGRADE/);
 
   const season = await processIncomingMessage({
     sender: '256700000011',
@@ -30,6 +55,7 @@ test('free users are blocked from Premium analysis and historical reports', asyn
     provider: 'mock'
   });
   assert.match(season, /PREMIUM FEATURE/);
+  assert.match(season, /UPGRADE/);
 });
 
 test('active Premium subscriber can access the analysis command', async () => {
