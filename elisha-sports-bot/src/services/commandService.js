@@ -100,6 +100,16 @@ export function interpretNaturalLanguage(input) {
       return { command: explicitCommand[1], args: explicitCommand[2] ? explicitCommand[2].trim() : null, raw: text };
     }
   }
+  // Use the richer intent classifier as a fallback after explicit commands and
+  // high-confidence data commands have had a chance to match.
+  const intent = detectFootballIntent(text);
+  if (intent === 'data_ml_ai' || intent === 'ml_ai') {
+    const teams = text.match(/(?:^|\b)(.+?)\s+(?:vs\.?|v\.?|versus|against)\s+(.+?)(?:\s+(?:who will win|who might win|who wins|prediction|analysis|today|tonight|tomorrow|recent form|head to head|h2h|team stats|statistics|stats|injuries|lineups?|squad news))?$/i);
+    if (teams?.[1]?.trim() && teams?.[2]?.trim()) {
+      return { command: 'analyze', args: teams[1].trim() + ' vs ' + teams[2].trim(), raw: text };
+    }
+  }
+
   if (/\b(football|soccer|match|matches|team|teams|player|players|league|leagues|goal|goals|score|scores|win|draw|lose|lost|won|coach|manager|transfer|tournament|formation|referee|penalt(?:y|ies)|offsides?|corners?|cards?|shots on target|possession|lineups?|injuries|expected goals|xg|both teams to score|btts|double chance|correct score|tactics|transfer news|premier league|champions league)\b/.test(text)) {
     return { command: 'football_help', args: text, raw: text };
   }
