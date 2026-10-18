@@ -71,7 +71,9 @@ export async function handleIncomingWebhook(req, res) {
             if (!(await claimQuotaNotice(message.sender, period))) continue;
             reply = formatQuotaLimitMessage(quota);
           } else {
-            reply = message.type === 'audio'\n              ? '🎙️ Thanks for the voice note! Voice-message understanding is planned for a future upgrade. For now, please type your football question, for example: “What matches are on today?” or “Arsenal vs Chelsea, who might win?”'\n              : '🖼️ Thanks for sharing the image! Image and screenshot analysis is planned for the next upgrade. You can still get help now by typing the match, teams, or statistics shown in the image. I look forward to helping you with image analysis soon!';
+            reply = message.type === 'audio'
+              ? '🎙️ Thanks for the voice note! Voice-message understanding is planned for a future upgrade. For now, please type your football question, for example: “What matches are on today?” or “Arsenal vs Chelsea, who might win?”'
+              : '🖼️ Thanks for sharing the image! Image and screenshot analysis is planned for the next upgrade. You can still get help now by typing the match, teams, or statistics shown in the image. I look forward to helping you with image analysis soon!';
           }
         }
         await provider.sendMessage({ to: message.sender, text: reply });
