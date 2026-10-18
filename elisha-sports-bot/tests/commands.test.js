@@ -69,3 +69,9 @@ test('natural language directs unsupported detailed football markets honestly', 
   assert.equal(parseCommand('Can you tell me the corners and cards prediction?').command, 'football_help');
   assert.equal(parseCommand('How much is premium?').command, 'upgrade');
 });
+
+
+test('unknown football questions receive an honest supported-features fallback', () => {
+  assert.equal(parseCommand('Explain football formations').command, 'football_help');
+  assert.equal(parseCommand('What is the Premier League?').command, 'football_help');
+});
