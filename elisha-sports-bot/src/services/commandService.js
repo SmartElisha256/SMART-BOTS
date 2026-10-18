@@ -506,7 +506,9 @@ async function handleAnalyzeCommand(args) {
         expected_goals: prediction.expected_goals,
         correct_score: prediction.correct_score,
         confidence: prediction.confidence,
-        data_quality: prediction.data_quality
+        data_quality: prediction.data_quality,
+        features_used: prediction.features_used,
+        model: prediction.model
       }) : 'MODEL OUTPUT: unavailable.',
       'RETRIEVED CONTEXT:\n' + contextText
     ].join('\n\n'));
