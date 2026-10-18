@@ -4,7 +4,7 @@ import { logger } from '../utils/logger.js';
 import { createMessagingAdapter } from '../providers/messaging/factory.js';
 import { processIncomingMessage } from '../services/commandService.js';
 import { checkAndConsumeDailyRequest, recordOutgoingMessage, formatQuotaLimitMessage, claimQuotaNotice } from '../services/usageService.js';
-import { handlePaymentCommand, isPaymentCommand, getAdminPhones, getPaymentRequestByReference } from '../services/manualPaymentService.js';
+import { handlePaymentCommand, isPaymentCommand, isPaymentAdmin, getAdminPhones, getPaymentRequestByReference } from '../services/manualPaymentService.js';
 
 function safeEqualText(left, right) {
   const a = Buffer.from(String(left ?? ''));
@@ -36,7 +36,7 @@ async function notifyPaymentAdmins({ provider, sender, reference, transactionId,
     '\nCustomer-selected plan: ' + planLabel +
     '\nExpected amount (verify; not confirmed): UGX ' + Number(amount).toLocaleString('en-UG') +
     '\nAccess duration if approved: ' + durationDays + ' day(s)\nStatus: PENDING — not yet verified\n\nVerify the transaction ID and exact amount in the merchant account before replying: APPROVE ' + reference +
-    '\nTo decline it, reply: REJECT ' + reference;
+    '\nTo decline it, reply: REJECT ' + reference + '\nFor the grouped queue, reply: PENDING.';
   for (const admin of admins) {
     try { await provider.sendMessage({ to: admin, text: details }); }
     catch (error) { logger.error({ error, admin, reference }, 'Could not notify payment administrator'); }
@@ -59,7 +59,11 @@ export async function handleIncomingWebhook(req, res) {
     for (const message of messages) {
       let reply;
       let paymentNotification = null;
-      if (isPaymentCommand(message.text)) {
+      const adminControlCommand = /^(approve|reject|setplan|changeplan|pending|pendingpayments|payments)(?:\s|$)/i.test(message.text);
+      if (isPaymentAdmin(message.sender) && !adminControlCommand) {
+        // Keep the personal admin number out of customer sports flows and quotas.
+        reply = '🔐 This number is reserved for payment alerts and admin controls. Use the customer-facing bot number for sports features. Admin commands: PENDING, APPROVE REF, REJECT REF, SETPLAN REF DAY|WEEK|MONTH.';
+      } else if (isPaymentCommand(message.text)) {
         reply = await handlePaymentCommand({ phone: message.sender, message: message.text });
         if (reply.startsWith('✅ Transaction ID received. Reference: ')) {
           const ref = reply.match(/Reference:\s*(\d+)/);

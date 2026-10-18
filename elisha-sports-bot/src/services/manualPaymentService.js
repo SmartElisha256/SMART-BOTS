@@ -11,7 +11,7 @@ export const PREMIUM_PLANS = Object.freeze({
 });
 
 export function isPaymentCommand(message) {
-  return /^(premium|upgrade|pay|payment|approve|reject|setplan|changeplan)(?:\s|$)/i.test(String(message ?? '').trim());
+  return /^(premium|upgrade|pay|payment|approve|reject|setplan|changeplan|pending|pendingpayments|payments)(?:\s|$)/i.test(String(message ?? '').trim());
 }
 export function getAdminPhones() {
   return String(env.PAYMENT_ADMIN_PHONES ?? '').split(',').map((phone) => phone.trim().replace(/[^0-9]/g, '')).filter(Boolean);
@@ -69,6 +69,53 @@ export async function getPaymentRequestByReference(paymentReference) {
   if (!payment) return null;
   const key = planKeyForDuration(payment.durationDays);
   return { ...payment, amountUgx: Number(payment.amountUgx ?? payment.amount_ugx), durationDays: Number(payment.durationDays ?? payment.plan_duration_days), planKey: key, planLabel: PREMIUM_PLANS[key].label };
+}
+
+export async function listPendingPayments({ adminPhone, page = 1 }) {
+  if (!isPaymentAdmin(adminPhone)) return '⛔ You are not authorized to view pending payments.';
+  const requestedPage = Number(page);
+  const safePage = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+  const pageSize = 10;
+
+  let total;
+  let payments;
+  if (pool) {
+    const countResult = await pool.query(
+      "SELECT COUNT(*)::int AS total FROM manual_payment_requests WHERE status = 'pending' AND transaction_id IS NOT NULL"
+    );
+    total = Number(countResult.rows[0]?.total ?? 0);
+    const result = await pool.query(
+      "SELECT id, phone, transaction_id, amount_ugx, plan_duration_days, created_at FROM manual_payment_requests WHERE status = 'pending' AND transaction_id IS NOT NULL ORDER BY created_at ASC, id ASC LIMIT $1 OFFSET $2",
+      [pageSize, (safePage - 1) * pageSize]
+    );
+    payments = result.rows;
+  } else {
+    const allPending = [...memoryPayments.values()]
+      .filter((payment) => payment.status === 'pending' && payment.transactionId)
+      .sort((a, b) => Number(a.id) - Number(b.id));
+    total = allPending.length;
+    payments = allPending.slice((safePage - 1) * pageSize, safePage * pageSize);
+  }
+
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  if (safePage > pageCount) return 'Page ' + safePage + ' does not exist. There are ' + pageCount + ' page(s). Send PENDING or PENDING ' + pageCount + '.';
+  if (!total) return '✅ No pending payments. New transaction submissions will appear here.';
+
+  const lines = payments.map((payment) => {
+    const durationDays = Number(payment.plan_duration_days ?? payment.durationDays ?? 7);
+    const key = planKeyForDuration(durationDays).toUpperCase();
+    const amount = Number(payment.amount_ugx ?? payment.amountUgx ?? 0).toLocaleString('en-UG');
+    const transactionId = String(payment.transaction_id ?? payment.transactionId ?? 'not recorded');
+    const phone = String(payment.phone ?? 'unknown');
+    return '#' + payment.id + ' — ' + phone + '\n' +
+      '   ' + key + ' (' + durationDays + 'd), expected UGX ' + amount + '\n' +
+      '   Txn: ' + transactionId + '\n' +
+      '   APPROVE ' + payment.id + ' | REJECT ' + payment.id;
+  });
+  return '📋 PENDING PAYMENTS — ' + total + ' total\nPage ' + safePage + '/' + pageCount +
+    '\nVerify each transaction ID and exact amount in the merchant account before approval.\n\n' +
+    lines.join('\n\n') +
+    (pageCount > 1 ? '\n\nNext: PENDING ' + (safePage < pageCount ? safePage + 1 : 1) : '');
 }
 
 export async function setPaymentPlan({ adminPhone, paymentReference, planKey }) {
@@ -194,6 +241,13 @@ export async function handlePaymentCommand({ phone, message }) {
     const planKey = first;
     const transactionId = parts.slice(1).join(' ');
     return submitPaymentProof({ phone, transactionId, planKey });
+  }
+  if (/^(pending|pendingpayments|payments)$/i.test(command)) {
+    const requestedPage = args ? Number(args) : 1;
+    if (args && (!/^\d+$/.test(args) || !Number.isSafeInteger(requestedPage) || requestedPage < 1)) {
+      return 'Usage: PENDING [PAGE_NUMBER]';
+    }
+    return listPendingPayments({ adminPhone: phone, page: requestedPage });
   }
   if (/^(setplan|changeplan)$/i.test(command)) {
     const match = args.match(/^(?:payment\s+)?(\d+)\s+(day|week|month)$/i);
