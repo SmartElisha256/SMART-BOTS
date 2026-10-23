@@ -7,7 +7,9 @@ import {
   setPaymentPlan,
   getPaymentRequestByReference
 } from '../services/manualPaymentService.js';
+import { afterPaymentApproved, afterPaymentRejected } from '../services/paymentNotifyHook.js';
 import { getUserSubscriptions } from '../services/subscriptionService.js';
+import { getPredictionAccuracySummary } from '../services/predictionLogService.js';
 import pool from '../database/pool.js';
 import { env } from '../config/env.js';
 import { getQueueStats } from '../jobs/queue.js';
@@ -18,7 +20,6 @@ export const adminRouter = Router();
 adminRouter.use(requireAdmin);
 
 function adminPhone() {
-  // First configured payment admin is used as the acting reviewer for dashboard actions.
   const phones = String(env.PAYMENT_ADMIN_PHONES || '')
     .split(',')
     .map((p) => p.trim().replace(/[^0-9]/g, ''))
@@ -41,10 +42,39 @@ adminRouter.get('/api/status', async (req, res) => {
   });
 });
 
+adminRouter.get('/api/digest', async (req, res) => {
+  let pending = 0;
+  let premiumActive = 0;
+  if (pool) {
+    try {
+      const p = await pool.query(
+        "SELECT COUNT(*)::int AS c FROM manual_payment_requests WHERE status = 'pending' AND transaction_id IS NOT NULL"
+      );
+      pending = Number(p.rows[0]?.c ?? 0);
+      const s = await pool.query(
+        "SELECT COUNT(*)::int AS c FROM subscriptions WHERE is_active = TRUE AND plan = 'premium' AND (expires_at IS NULL OR expires_at > NOW())"
+      );
+      premiumActive = Number(s.rows[0]?.c ?? 0);
+    } catch {
+      /* tables may be incomplete */
+    }
+  }
+  const accuracy = await getPredictionAccuracySummary();
+  const queue = await getQueueStats();
+  res.json({
+    ok: true,
+    generatedAt: new Date().toISOString(),
+    pendingPayments: pending,
+    activePremium: premiumActive,
+    accuracy,
+    queue,
+    circuits: { ml: getMlCircuitState(), ai: getAiCircuitState() }
+  });
+});
+
 adminRouter.get('/api/payments/pending', async (req, res) => {
   const page = Number(req.query.page) || 1;
   const text = await listPendingPayments({ adminPhone: adminPhone(), page });
-  // Also return structured rows when DB is available.
   let rows = [];
   if (pool) {
     const result = await pool.query(
@@ -64,15 +94,25 @@ adminRouter.post('/api/payments/:id/approve', async (req, res) => {
     adminPhone: adminPhone(),
     paymentReference: req.params.id
   });
-  res.json({ ok: !message.startsWith('⛔') && !message.startsWith('No pending'), message });
+  const ok = !message.startsWith('⛔') && !message.startsWith('No pending');
+  if (ok) {
+    await afterPaymentApproved(req.params.id).catch(() => {});
+  }
+  res.json({ ok, message });
 });
 
 adminRouter.post('/api/payments/:id/reject', async (req, res) => {
+  // Capture phone before reject clears pending row shape
+  const before = await getPaymentRequestByReference(req.params.id);
   const message = await rejectPayment({
     adminPhone: adminPhone(),
     paymentReference: req.params.id
   });
-  res.json({ ok: !message.startsWith('⛔') && !message.startsWith('No pending'), message });
+  const ok = !message.startsWith('⛔') && !message.startsWith('No pending');
+  if (ok && before) {
+    await afterPaymentRejected(req.params.id).catch(() => {});
+  }
+  res.json({ ok, message });
 });
 
 adminRouter.post('/api/payments/:id/plan', async (req, res) => {
@@ -117,13 +157,7 @@ adminRouter.get('/api/users/:phone', async (req, res) => {
     payments = payResult.rows;
   }
 
-  res.json({
-    ok: true,
-    phone,
-    subscriptions,
-    usage,
-    payments
-  });
+  res.json({ ok: true, phone, subscriptions, usage, payments });
 });
 
 adminRouter.get('/api/audit', async (req, res) => {
@@ -143,7 +177,6 @@ adminRouter.get('/api/audit', async (req, res) => {
   }
 });
 
-/** Simple private HTML dashboard (no external assets). */
 adminRouter.get('/', (req, res) => {
   const key = String(req.query.key || '');
   res.type('html').send(`<!DOCTYPE html>
@@ -169,18 +202,10 @@ adminRouter.get('/', (req, res) => {
 </head>
 <body>
   <h1>ELISHA SPORTS BOT — Admin</h1>
-  <p class="muted">Private dashboard. Keep the admin key secret. Do not share this URL publicly.</p>
-
-  <div class="card">
-    <strong>Status</strong>
-    <pre id="status">Loading…</pre>
-  </div>
-
-  <div class="card">
-    <strong>Pending payments</strong>
-    <div id="payments">Loading…</div>
-  </div>
-
+  <p class="muted">Private dashboard. Keep the admin key secret.</p>
+  <div class="card"><strong>Digest</strong><pre id="digest">Loading…</pre></div>
+  <div class="card"><strong>Status</strong><pre id="status">Loading…</pre></div>
+  <div class="card"><strong>Pending payments</strong><div id="payments">Loading…</div></div>
   <div class="card">
     <strong>User lookup</strong>
     <form id="lookupForm">
@@ -189,80 +214,48 @@ adminRouter.get('/', (req, res) => {
     </form>
     <pre id="userResult"></pre>
   </div>
-
-  <div class="card">
-    <strong>Recent audit log</strong>
-    <pre id="audit">Loading…</pre>
-  </div>
-
+  <div class="card"><strong>Recent audit log</strong><pre id="audit">Loading…</pre></div>
 <script>
 const KEY = ${JSON.stringify(key)};
-const headers = () => ({
-  'Content-Type': 'application/json',
-  'x-admin-key': KEY
-});
-
 async function api(path, opts = {}) {
   const res = await fetch(path + (path.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(KEY), {
     ...opts,
-    headers: { ...headers(), ...(opts.headers || {}) }
+    headers: { 'Content-Type': 'application/json', 'x-admin-key': KEY, ...(opts.headers || {}) }
   });
   return res.json();
 }
-
-async function loadStatus() {
-  const data = await api('/admin/api/status');
-  document.getElementById('status').textContent = JSON.stringify(data, null, 2);
+async function loadDigest() {
+  document.getElementById('digest').textContent = JSON.stringify(await api('/admin/api/digest'), null, 2);
 }
-
+async function loadStatus() {
+  document.getElementById('status').textContent = JSON.stringify(await api('/admin/api/status'), null, 2);
+}
 async function loadPayments() {
   const data = await api('/admin/api/payments/pending');
   const el = document.getElementById('payments');
-  if (!data.rows || !data.rows.length) {
-    el.innerHTML = '<p class="muted">No pending payments.</p>';
-    return;
-  }
+  if (!data.rows || !data.rows.length) { el.innerHTML = '<p class="muted">No pending payments.</p>'; return; }
   el.innerHTML = '<table><thead><tr><th>ID</th><th>Phone</th><th>Txn</th><th>Amount</th><th>Days</th><th></th></tr></thead><tbody>' +
-    data.rows.map(r => '<tr>' +
-      '<td>' + r.id + '</td>' +
-      '<td>' + r.phone + '</td>' +
-      '<td>' + (r.transaction_id || '') + '</td>' +
-      '<td>UGX ' + Number(r.amount_ugx).toLocaleString() + '</td>' +
-      '<td>' + r.plan_duration_days + '</td>' +
-      '<td>' +
-        '<button class="ok" data-act="approve" data-id="' + r.id + '">Approve</button>' +
-        '<button class="bad" data-act="reject" data-id="' + r.id + '">Reject</button>' +
-      '</td></tr>').join('') +
+    data.rows.map(r => '<tr><td>' + r.id + '</td><td>' + r.phone + '</td><td>' + (r.transaction_id||'') + '</td><td>UGX ' + Number(r.amount_ugx).toLocaleString() + '</td><td>' + r.plan_duration_days + '</td><td><button class="ok" data-act="approve" data-id="' + r.id + '">Approve</button><button class="bad" data-act="reject" data-id="' + r.id + '">Reject</button></td></tr>').join('') +
     '</tbody></table>';
   el.querySelectorAll('button').forEach(btn => {
     btn.onclick = async () => {
-      const id = btn.dataset.id;
-      const act = btn.dataset.act;
       btn.disabled = true;
-      const result = await api('/admin/api/payments/' + id + '/' + act, { method: 'POST' });
+      const result = await api('/admin/api/payments/' + btn.dataset.id + '/' + btn.dataset.act, { method: 'POST' });
       alert(result.message || JSON.stringify(result));
-      loadPayments();
-      loadAudit();
+      loadPayments(); loadAudit(); loadDigest();
     };
   });
 }
-
 async function loadAudit() {
-  const data = await api('/admin/api/audit?limit=30');
-  document.getElementById('audit').textContent = JSON.stringify(data.rows || [], null, 2);
+  document.getElementById('audit').textContent = JSON.stringify((await api('/admin/api/audit?limit=30')).rows || [], null, 2);
 }
-
 document.getElementById('lookupForm').onsubmit = async (e) => {
   e.preventDefault();
   const phone = new FormData(e.target).get('phone');
-  const data = await api('/admin/api/users/' + encodeURIComponent(phone));
-  document.getElementById('userResult').textContent = JSON.stringify(data, null, 2);
+  document.getElementById('userResult').textContent = JSON.stringify(await api('/admin/api/users/' + encodeURIComponent(phone)), null, 2);
 };
-
-loadStatus();
-loadPayments();
-loadAudit();
-setInterval(() => { loadPayments(); loadStatus(); }, 30000);
+loadDigest(); loadStatus(); loadPayments(); loadAudit();
+setInterval(() => { loadPayments(); loadStatus(); loadDigest(); }, 30000);
 </script>
 </body>
 </html>`);

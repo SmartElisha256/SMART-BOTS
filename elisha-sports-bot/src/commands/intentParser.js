@@ -2,7 +2,6 @@ import { detectFootballIntent } from '../services/footballMlService.js';
 import { normalizeLeagueName } from '../utils/leagueAliases.js';
 
 const COMMAND_REGEX = /^([a-z0-9]+)(?:\s+(.+))?$/i;
-
 const LEAGUE_PHRASE = '(premier league|la liga|serie a|bundesliga|ligue 1|champions league|europa league|epl|ucl|mls|uganda|upl)';
 
 export function interpretNaturalLanguage(input) {
@@ -21,22 +20,26 @@ export function interpretNaturalLanguage(input) {
   if (/\b(which leagues|supported leagues|list leagues|available leagues)\b/.test(text) || /^leagues?$/.test(text)) {
     return { command: 'leagues', args: null, raw: text };
   }
+  if (/^(team|myteam|favourite team|favorite team)\b/.test(text) || /^my team\b/.test(text)) {
+    const args = text.replace(/^(team|myteam|favourite team|favorite team|my team)\s*/i, '').trim();
+    return { command: 'team', args: args || null, raw: text };
+  }
   if (/^h2h\s+/.test(text)) return { command: 'h2h', args: text.replace(/^h2h\s+/, '').trim(), raw: text };
   if (/\b(today'?s? tips?|tips today|best pick today|today'?s? best pick|give me a tip|football tip today|today tip)\b/.test(text)) {
     return { command: 'tip', args: null, raw: text };
   }
   if (/\b(live scores?|scores? right now|matches live|what'?s live)\b/.test(text)) {
-    const leagueMatch = text.match(new RegExp(`\\b(?:in|for)\\s+(${LEAGUE_PHRASE})\\b`));
+    const leagueMatch = text.match(new RegExp('\\b(?:in|for)\\s+(' + LEAGUE_PHRASE + ')\\b'));
     return { command: 'live', args: leagueMatch ? normalizeLeagueName(leagueMatch[1]) : null, raw: text };
   }
   if (/\b(fixtures?|matches today|games today|upcoming matches|what matches are on|who is playing today)\b/.test(text)) {
-    const leagueMatch = text.match(new RegExp(`\\b(?:in|for)\\s+(${LEAGUE_PHRASE})\\b`));
+    const leagueMatch = text.match(new RegExp('\\b(?:in|for)\\s+(' + LEAGUE_PHRASE + ')\\b'));
     return { command: 'fixtures', args: leagueMatch ? normalizeLeagueName(leagueMatch[1]) : null, raw: text };
   }
   if (/\b(league table|standings|table for|show the table|table)\b/.test(text)) {
     const league =
       text.match(/(?:table for|standings for|table of|standings of) (.+)$/)?.[1] ||
-      text.match(new RegExp(`\\b(${LEAGUE_PHRASE})\\b`))?.[1];
+      text.match(new RegExp('\\b(' + LEAGUE_PHRASE + ')\\b'))?.[1];
     return { command: 'table', args: league ? normalizeLeagueName(league) : null, raw: text };
   }
 
@@ -85,9 +88,9 @@ export function interpretNaturalLanguage(input) {
   }
 
   const explicitCommand = text.match(COMMAND_REGEX);
-  if (explicitCommand && /^(menu|help|fixtures|live|table|form|h2h|analyze|analysis|season|historical|tip|tips|start|stop|leagues|league)$/.test(explicitCommand[1])) {
+  if (explicitCommand && /^(menu|help|fixtures|live|table|form|h2h|analyze|analysis|season|historical|tip|tips|start|stop|leagues|league|team|myteam)$/.test(explicitCommand[1])) {
     if (!(explicitCommand[1] === 'form' && /^form of\s+/.test(text))) {
-      return { command: explicitCommand[1], args: explicitCommand[2] ? explicitCommand[2].trim() : null, raw: text };
+      return { command: explicitCommand[1] === 'myteam' ? 'team' : explicitCommand[1], args: explicitCommand[2] ? explicitCommand[2].trim() : null, raw: text };
     }
   }
 
