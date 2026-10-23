@@ -9,16 +9,18 @@ Available commands:
 
 • MENU — show this menu
 • Ask naturally — e.g. “What matches are on today?” or “How is Arsenal doing?”
-• TIP / “Today's tip” — check available fixtures before requesting a match analysis
-• FIXTURES — upcoming matches
+• TIP / “Today's tip” — fixture check; model tip only when data quality is strong
+• FIXTURES — upcoming matches (optional league)
 • LIVE — live scores (when available)
-• TABLE — league standings
-• FORM [TEAM] — recent results for a team
+• TABLE — league standings (e.g. TABLE La Liga)
+• FORM [TEAM] — recent results (uses your TEAM if set)
+• TEAM [NAME] — save favourite team
 • H2H [TEAM A] vs [TEAM B] — head-to-head stats
-• ANALYZE [TEAM A] vs [TEAM B] — form, squad availability, strength, lineups, and data-quality analysis
-• SEASON [LEAGUE] [YEAR] — historical season summary
+• ANALYZE [TEAM A] vs [TEAM B] — Premium ML + context analysis
+• SEASON [LEAGUE] [YEAR] — historical season summary (Premium)
+• LEAGUES — supported league aliases
 • HELP — usage guide
-• UPGRADE — view Premium plans and payment steps
+• UPGRADE — Premium plans and Mobile Money steps
 • START — enable notifications
 • STOP — disable notifications`;
 }
@@ -34,41 +36,23 @@ Examples:
 “How is Arsenal doing?”
   Shows Arsenal's recent form.
 
+TEAM Arsenal
+  Saves your favourite team for quicker FORM requests.
+
 “Arsenal vs Chelsea, who might win?”
-  Requests detailed analysis (Premium required).
+  Requests detailed analysis (Premium required). Weak data → no tip sold.
 
 “Today's tip”
-  Checks available fixtures; it will not invent a pick if reliable data is unavailable.
+  Checks fixtures; will not invent a pick if quality is low.
 
-Voice notes
-  Voice-note understanding is planned for a future upgrade. Please type your football question for now.
+FIXTURES / TABLE La Liga / LEAGUES
+  Multi-league support when the sports API is configured.
 
-FIXTURES
-  Shows next 3 upcoming matches.
-
-TABLE
-  Shows league standings (top 5 teams).
-
-FORM Arsenal
-  Shows Arsenal's last 5 matches.
-
-H2H Manchester City vs Liverpool
-  Shows historical head-to-head record.
-
-ANALYZE Arsenal vs Chelsea
-  Compares recent form, head-to-head, squad availability, team strength, lineup context, and data-quality warnings.
-
-SEASON Premier League 2023
-  Summarizes completed fixtures, points, goals, and home/away records for a historical season.
-
-LIVE
-  Shows current live scores (when available).
-
-START / STOP
-  Enable or disable match notifications.
+ANALYZE Arsenal vs Chelsea (Premium)
+  ML estimates + context; logged for accuracy tracking.
 
 UPGRADE
-  Shows Premium plans and manual payment instructions. Activation requires administrator verification.
+  Day / Week / Month Mobile Money plans. Admin verifies before activation.
 
 Reply MENU for all commands.`;
 }
