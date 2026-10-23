@@ -82,17 +82,24 @@ export function isPredictionStrongEnough(prediction) {
   const matches = Number(dq.historical_matches);
   const warnings = Array.isArray(dq.warnings) ? dq.warnings : [];
   const conf = String(prediction.confidence?.level ?? '').toLowerCase();
+  const top = Number(prediction?.confidence?.top_result_probability);
 
-  if (Number.isFinite(matches) && matches < 20) {
+  if (Number.isFinite(matches) && matches < 50) {
     return {
       ok: false,
       reason: `Only ${matches} historical matches are available. That is too few for a reliable Premium-grade tip.`
     };
   }
-  if (conf === 'low' || conf === 'very_low') {
+  if (conf === 'low' || conf === 'very_low' || conf === 'limited') {
     return {
       ok: false,
       reason: `Model confidence is ${conf}. I will not present a tip as reliable under low confidence.`
+    };
+  }
+  if (Number.isFinite(top) && top < 0.48) {
+    return {
+      ok: false,
+      reason: `Top outcome probability is ${(top * 100).toFixed(1)}%. Tips are only shown when the model is more decisive.`
     };
   }
   if (warnings.some((w) => /demo|synthetic|unavailable|insufficient/i.test(String(w)))) {
@@ -128,11 +135,10 @@ export async function getPredictionAccuracySummary({ limit = 100 } = {}) {
     return {
       resolved,
       hits,
-      hitRate: resolved ? hits / resolved : null,
-      windowDays: 90
+      hitRate: resolved ? hits / resolved : null
     };
   } catch (error) {
-    logger.warn({ error }, 'Accuracy summary unavailable');
-    return { resolved: 0, hits: 0, hitRate: null, error: error.message };
+    logger.warn({ error }, 'Could not read prediction accuracy summary');
+    return { resolved: 0, hits: 0, hitRate: null };
   }
 }
