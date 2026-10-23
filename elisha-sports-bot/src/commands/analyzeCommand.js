@@ -2,6 +2,7 @@ import { getUpcomingFixtures } from '../services/sportsService.js';
 import { getMatchContext, formatMatchContext } from '../services/fixtureContextService.js';
 import { answerFootballQuestion } from '../services/footballAssistantService.js';
 import { predictFootballMatch, formatMlPrediction } from '../services/footballMlService.js';
+import { logPrediction, isPredictionStrongEnough } from '../services/predictionLogService.js';
 import { logger } from '../utils/logger.js';
 import { appendBettingDisclaimer } from './messages.js';
 
@@ -14,7 +15,7 @@ async function getFootballAssistantReply(question) {
   }
 }
 
-export async function runTipCommand() {
+export async function runTipCommand({ phone = null } = {}) {
   try {
     const fixtures = await getUpcomingFixtures({ limit: 5, onlyResults: false });
     if (!fixtures || fixtures.length === 0) {
@@ -36,6 +37,15 @@ export async function runTipCommand() {
         awayTeam: selected.away,
         kickoff: selected.time ?? null
       });
+      await logPrediction({ phone, prediction, sourceCommand: 'tip' });
+
+      const strength = isPredictionStrongEnough(prediction);
+      if (!strength.ok) {
+        return appendBettingDisclaimer(
+          `⚽ TODAY’S TIP — DATA CHECK\n\nVerified fixture: ${selected.home} vs ${selected.away}\n\n⚠️ ${strength.reason}\n\nI will not invent a pick. You can still use FIXTURES, FORM, or H2H for factual context.`
+        );
+      }
+
       const mlText = formatMlPrediction(prediction);
       const aiText = await getFootballAssistantReply(
         `Explain this ML output using only the supplied values. Do not invent or alter probabilities, statistics, team news, or facts.\n${JSON.stringify({
@@ -65,7 +75,7 @@ export async function runTipCommand() {
   }
 }
 
-export async function runAnalyzeCommand(args) {
+export async function runAnalyzeCommand(args, { phone = null } = {}) {
   if (!args || !/\s+vs?\s+/i.test(args)) return 'Usage: ANALYZE Arsenal vs Chelsea';
   const parts = args.split(/\s+vs?\s+/i);
   if (parts.length !== 2 || !parts[0].trim() || !parts[1].trim()) {
@@ -83,8 +93,16 @@ export async function runAnalyzeCommand(args) {
   const contextText = context
     ? formatMatchContext(context)
     : 'PRE-MATCH SQUAD & TEAM CONTEXT\nContext providers failed or are unavailable; do not infer current injuries, lineups, or team statistics.';
+
+  if (prediction) {
+    await logPrediction({ phone, prediction, sourceCommand: 'analyze' });
+  }
+
+  const strength = isPredictionStrongEnough(prediction);
   const predictionText = prediction
-    ? formatMlPrediction(prediction)
+    ? (strength.ok
+      ? formatMlPrediction(prediction)
+      : ('⚠️ MODEL OUTPUT HELD BACK\n' + strength.reason + '\n\nRaw probabilities are not shown as a tip when data quality is weak.'))
     : ('ML prediction unavailable: ' + (predictionResult.reason?.message || 'model unavailable'));
 
   if (!prediction && !context) {
@@ -98,14 +116,16 @@ export async function runAnalyzeCommand(args) {
   }
 
   let aiText = null;
-  try {
-    aiText = await getFootballAssistantReply([
-      'Explain the supplied football evidence for the user.',
-      'Use only facts and numerical values explicitly supplied below. Do not invent, update, or infer injuries, lineups, team news, recent results, probabilities, or statistics.',
-      'Separate model estimates from retrieved context. Mention unavailable or low-quality data and explain uncertainty.',
-      'Do not claim a forecast is certain.',
-      prediction
-        ? 'MODEL OUTPUT:\n' + JSON.stringify({
+  // Skip expensive AI when model was weak and only thin context remains — saves cost.
+  const runAi = Boolean(prediction && strength.ok) || Boolean(context);
+  if (runAi && prediction && strength.ok) {
+    try {
+      aiText = await getFootballAssistantReply([
+        'Explain the supplied football evidence for the user.',
+        'Use only facts and numerical values explicitly supplied below. Do not invent, update, or infer injuries, lineups, team news, recent results, probabilities, or statistics.',
+        'Separate model estimates from retrieved context. Mention unavailable or low-quality data and explain uncertainty.',
+        'Do not claim a forecast is certain.',
+        'MODEL OUTPUT:\n' + JSON.stringify({
           fixture: prediction.fixture,
           match_result: prediction.match_result,
           machine_learning_result: prediction.machine_learning_result,
@@ -118,22 +138,24 @@ export async function runAnalyzeCommand(args) {
           data_quality: prediction.data_quality,
           features_used: prediction.features_used,
           model: prediction.model
-        })
-        : 'MODEL OUTPUT: unavailable.',
-      'RETRIEVED CONTEXT:\n' + contextText
-    ].join('\n\n'));
-  } catch (error) {
-    logger.warn({ error, teamA, teamB }, 'AI explanation unavailable for match analysis');
+        }),
+        'RETRIEVED CONTEXT:\n' + contextText
+      ].join('\n\n'));
+    } catch (error) {
+      logger.warn({ error, teamA, teamB }, 'AI explanation unavailable for match analysis');
+    }
   }
 
   const partsOut = [
-    '⚽ MATCH ANALYSIS\n' + (prediction ? predictionText : ('⚠️ ML MODEL\n' + predictionText)),
+    '⚽ MATCH ANALYSIS\n' + predictionText,
     context
       ? ('\n\n📚 DATA & TEAM CONTEXT\n' + contextText)
       : '\n\n📚 DATA & TEAM CONTEXT\nCurrent context could not be retrieved; no current team-news claims are made.',
     aiText
       ? ('\n\n🤖 AI EXPLANATION\n' + aiText)
-      : '\n\nAI explanation is unavailable; showing only successfully retrieved data and model output.'
+      : (prediction && !strength.ok
+        ? '\n\nAI explanation skipped because the model output did not pass the data-quality gate.'
+        : '\n\nAI explanation is unavailable; showing only successfully retrieved data and model output.')
   ];
   return appendBettingDisclaimer(partsOut.join(''));
 }
