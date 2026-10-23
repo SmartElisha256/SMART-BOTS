@@ -1,8 +1,12 @@
 import pool from '../database/pool.js';
 import { env } from '../config/env.js';
 import { subscribeUser } from './subscriptionService.js';
+import { logger } from '../utils/logger.js';
+import { notifyCustomerPaymentApproved, notifyCustomerPaymentRejected } from './customerNotifyService.js';
+import { markConverted } from './conversionService.js';
 
 const memoryPayments = new Map();
+const memoryAudit = [];
 
 export const PREMIUM_PLANS = Object.freeze({
   day: { label: '1 day', durationDays: 1, price: Number(env.PREMIUM_PRICE_DAY_UGX) },
@@ -22,6 +26,30 @@ export function isPaymentAdmin(phone) {
 }
 function validPlan(plan) {
   return Boolean(plan && Number.isInteger(plan.price) && plan.price > 0 && Number.isInteger(plan.durationDays));
+}
+
+async function recordPaymentAudit({ paymentId, action, previousStatus, newStatus, adminPhone, details, client = null }) {
+  const payload = {
+    paymentId: Number(paymentId),
+    action: String(action),
+    previousStatus: previousStatus ? String(previousStatus) : null,
+    newStatus: newStatus ? String(newStatus) : null,
+    adminPhone: String(adminPhone),
+    details: details ? String(details) : null
+  };
+  if (!pool) {
+    memoryAudit.push({ ...payload, createdAt: new Date().toISOString() });
+    return;
+  }
+  const runner = client || pool;
+  try {
+    await runner.query(
+      `INSERT INTO payment_audit_log (payment_id, action, previous_status, new_status, admin_phone, details) VALUES ($1, $2, $3, $4, $5, $6)`,
+      [payload.paymentId, payload.action, payload.previousStatus, payload.newStatus, payload.adminPhone, payload.details]
+    );
+  } catch (error) {
+    logger.error({ error, paymentId: payload.paymentId, action: payload.action }, 'Failed to write payment audit log');
+  }
 }
 
 export function formatPaymentInstructions() {
@@ -76,46 +104,29 @@ export async function listPendingPayments({ adminPhone, page = 1 }) {
   const requestedPage = Number(page);
   const safePage = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
   const pageSize = 10;
-
-  let total;
-  let payments;
+  let total, payments;
   if (pool) {
-    const countResult = await pool.query(
-      "SELECT COUNT(*)::int AS total FROM manual_payment_requests WHERE status = 'pending' AND transaction_id IS NOT NULL"
-    );
+    const countResult = await pool.query("SELECT COUNT(*)::int AS total FROM manual_payment_requests WHERE status = 'pending' AND transaction_id IS NOT NULL");
     total = Number(countResult.rows[0]?.total ?? 0);
-    const result = await pool.query(
-      "SELECT id, phone, transaction_id, amount_ugx, plan_duration_days, created_at FROM manual_payment_requests WHERE status = 'pending' AND transaction_id IS NOT NULL ORDER BY created_at ASC, id ASC LIMIT $1 OFFSET $2",
-      [pageSize, (safePage - 1) * pageSize]
-    );
+    const result = await pool.query("SELECT id, phone, transaction_id, amount_ugx, plan_duration_days, created_at FROM manual_payment_requests WHERE status = 'pending' AND transaction_id IS NOT NULL ORDER BY created_at ASC, id ASC LIMIT $1 OFFSET $2", [pageSize, (safePage - 1) * pageSize]);
     payments = result.rows;
   } else {
-    const allPending = [...memoryPayments.values()]
-      .filter((payment) => payment.status === 'pending' && payment.transactionId)
-      .sort((a, b) => Number(a.id) - Number(b.id));
+    const allPending = [...memoryPayments.values()].filter((payment) => payment.status === 'pending' && payment.transactionId).sort((a, b) => Number(a.id) - Number(b.id));
     total = allPending.length;
     payments = allPending.slice((safePage - 1) * pageSize, safePage * pageSize);
   }
-
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   if (safePage > pageCount) return 'Page ' + safePage + ' does not exist. There are ' + pageCount + ' page(s). Send PENDING or PENDING ' + pageCount + '.';
   if (!total) return '✅ No pending payments. New transaction submissions will appear here.';
-
   const lines = payments.map((payment) => {
     const durationDays = Number(payment.plan_duration_days ?? payment.durationDays ?? 7);
     const key = planKeyForDuration(durationDays).toUpperCase();
     const amount = Number(payment.amount_ugx ?? payment.amountUgx ?? 0).toLocaleString('en-UG');
     const transactionId = String(payment.transaction_id ?? payment.transactionId ?? 'not recorded');
     const phone = String(payment.phone ?? 'unknown');
-    return '#' + payment.id + ' — ' + phone + '\n' +
-      '   ' + key + ' (' + durationDays + 'd), expected UGX ' + amount + '\n' +
-      '   Txn: ' + transactionId + '\n' +
-      '   APPROVE ' + payment.id + ' | REJECT ' + payment.id;
+    return '#' + payment.id + ' — ' + phone + '\n   ' + key + ' (' + durationDays + 'd), expected UGX ' + amount + '\n   Txn: ' + transactionId + '\n   APPROVE ' + payment.id + ' | REJECT ' + payment.id;
   });
-  return '📋 PENDING PAYMENTS — ' + total + ' total\nPage ' + safePage + '/' + pageCount +
-    '\nVerify each transaction ID and exact amount in the merchant account before approval.\n\n' +
-    lines.join('\n\n') +
-    (pageCount > 1 ? '\n\nNext: PENDING ' + (safePage < pageCount ? safePage + 1 : 1) : '');
+  return '📋 PENDING PAYMENTS — ' + total + ' total\nPage ' + safePage + '/' + pageCount + '\nVerify each transaction ID and exact amount in the merchant account before approval.\n\n' + lines.join('\n\n') + (pageCount > 1 ? '\n\nNext: PENDING ' + (safePage < pageCount ? safePage + 1 : 1) : '');
 }
 
 export async function setPaymentPlan({ adminPhone, paymentReference, planKey }) {
@@ -123,15 +134,11 @@ export async function setPaymentPlan({ adminPhone, paymentReference, planKey }) 
   const ref = Number(paymentReference);
   const key = String(planKey ?? '').toLowerCase();
   const plan = PREMIUM_PLANS[key];
-  if (!Number.isSafeInteger(ref) || ref < 1 || !validPlan(plan)) {
-    return 'Admin usage: SETPLAN PAYMENT_REFERENCE DAY|WEEK|MONTH';
-  }
+  if (!Number.isSafeInteger(ref) || ref < 1 || !validPlan(plan)) return 'Admin usage: SETPLAN PAYMENT_REFERENCE DAY|WEEK|MONTH';
   if (pool) {
-    const result = await pool.query(
-      "UPDATE manual_payment_requests SET amount_ugx = $2, plan_duration_days = $3 WHERE id = $1 AND status = 'pending' AND transaction_id IS NOT NULL RETURNING id, phone, amount_ugx, plan_duration_days",
-      [ref, plan.price, plan.durationDays]
-    );
+    const result = await pool.query("UPDATE manual_payment_requests SET amount_ugx = $2, plan_duration_days = $3 WHERE id = $1 AND status = 'pending' AND transaction_id IS NOT NULL RETURNING id", [ref, plan.price, plan.durationDays]);
     if (!result.rows[0]) return 'No pending transaction-ID payment found for that reference. Approved or rejected payments cannot be changed.';
+    await recordPaymentAudit({ paymentId: ref, action: 'SETPLAN', previousStatus: 'pending', newStatus: 'pending', adminPhone, details: `Plan changed to ${key} (${plan.durationDays}d), expected UGX ${plan.price}` });
     return '✅ Payment reference ' + ref + ' updated to ' + key.toUpperCase() + ' (' + plan.durationDays + ' day(s)). Expected amount is now UGX ' + plan.price.toLocaleString('en-UG') + '. Verify the actual amount paid in the merchant account before approving.';
   }
   const payment = memoryPayments.get(ref);
@@ -139,6 +146,7 @@ export async function setPaymentPlan({ adminPhone, paymentReference, planKey }) 
   payment.amountUgx = plan.price;
   payment.durationDays = plan.durationDays;
   payment.planLabel = plan.label;
+  await recordPaymentAudit({ paymentId: ref, action: 'SETPLAN', previousStatus: 'pending', newStatus: 'pending', adminPhone, details: `Plan changed to ${key} (${plan.durationDays}d), expected UGX ${plan.price}` });
   return '✅ Payment reference ' + ref + ' updated to ' + key.toUpperCase() + ' (' + plan.durationDays + ' day(s)). Expected amount is now UGX ' + plan.price.toLocaleString('en-UG') + '. Verify the actual amount paid in the merchant account before approving.';
 }
 
@@ -147,12 +155,8 @@ export async function submitPaymentProof({ phone, transactionId, planKey }) {
   if (!validPlan(plan)) return 'Choose a plan explicitly: PAY DAY TRANSACTION_ID, PAY WEEK TRANSACTION_ID, or PAY MONTH TRANSACTION_ID. No plan is assumed.';
   const id = String(transactionId ?? '').trim().replace(/\s+/g, '');
   if (!/^[A-Za-z0-9-]{6,80}$/.test(id)) return 'Send the transaction ID from your successful receipt. Example: PAY WEEK ABC123XYZ. Never send your PIN or OTP.';
-
   if (pool) {
-    const result = await pool.query(
-      "INSERT INTO manual_payment_requests (phone, transaction_id, amount_ugx, network, plan_duration_days, status) VALUES ($1, $2, $3, $4, $5, 'pending') ON CONFLICT (transaction_id) DO NOTHING RETURNING id",
-      [phone, id, plan.price, env.MOMO_NETWORK || 'not-configured', plan.durationDays]
-    );
+    const result = await pool.query("INSERT INTO manual_payment_requests (phone, transaction_id, amount_ugx, network, plan_duration_days, status) VALUES ($1, $2, $3, $4, $5, 'pending') ON CONFLICT (transaction_id) DO NOTHING RETURNING id", [phone, id, plan.price, env.MOMO_NETWORK || 'not-configured', plan.durationDays]);
     if (!result.rows[0]) {
       const existing = await pool.query('SELECT phone, status, id, amount_ugx, plan_duration_days FROM manual_payment_requests WHERE transaction_id = $1', [id]);
       if (existing.rows[0]?.phone !== phone) return 'That transaction ID has already been submitted. Contact the administrator if needed.';
@@ -162,11 +166,8 @@ export async function submitPaymentProof({ phone, transactionId, planKey }) {
     }
     return '✅ Transaction ID received. Reference: ' + result.rows[0].id + '\nSelected plan: ' + plan.label + ' — UGX ' + plan.price.toLocaleString('en-UG') + '\nStatus: PENDING VERIFICATION. Access is not active yet.';
   }
-
   const existing = [...memoryPayments.values()].find((item) => item.transactionId === id);
-  if (existing) return existing.phone === phone
-    ? 'Transaction ID already received. Reference: ' + existing.id + '. Saved plan: ' + planKeyForDuration(existing.durationDays).toUpperCase() + ' (' + existing.durationDays + ' day(s)), expected UGX ' + Number(existing.amountUgx).toLocaleString('en-UG') + '. Status: ' + existing.status + '.'
-    : 'That transaction ID has already been submitted. Contact the administrator if needed.';
+  if (existing) return existing.phone === phone ? 'Transaction ID already received. Reference: ' + existing.id + '. Saved plan: ' + planKeyForDuration(existing.durationDays).toUpperCase() + ' (' + existing.durationDays + ' day(s)), expected UGX ' + Number(existing.amountUgx).toLocaleString('en-UG') + '. Status: ' + existing.status + '.' : 'That transaction ID has already been submitted. Contact the administrator if needed.';
   const payment = { id: memoryPayments.size + 1, phone, transactionId: id, amountUgx: plan.price, durationDays: plan.durationDays, planLabel: plan.label, status: 'pending' };
   memoryPayments.set(payment.id, payment);
   return '✅ Transaction ID received. Reference: ' + payment.id + '\nSelected plan: ' + plan.label + ' — UGX ' + plan.price.toLocaleString('en-UG') + '\nStatus: PENDING VERIFICATION. Access is not active yet.';
@@ -183,16 +184,11 @@ export async function approvePayment({ adminPhone, paymentReference }) {
       await client.query('BEGIN');
       const result = await client.query("SELECT * FROM manual_payment_requests WHERE id = $1 AND status = 'pending' AND transaction_id IS NOT NULL FOR UPDATE", [ref]);
       payment = result.rows[0];
-      if (!payment) {
-        await client.query('ROLLBACK');
-        return 'No pending transaction-ID payment found for that reference.';
-      }
+      if (!payment) { await client.query('ROLLBACK'); return 'No pending transaction-ID payment found for that reference.'; }
       const durationDays = Number(payment.plan_duration_days || 7);
-      await client.query(
-        "INSERT INTO subscriptions (phone, plan, is_active, expires_at) VALUES ($1, 'premium', TRUE, NOW() + ($2 * INTERVAL '1 day')) ON CONFLICT (phone, plan) DO UPDATE SET is_active = TRUE, expires_at = GREATEST(COALESCE(subscriptions.expires_at, NOW()), NOW()) + ($2 * INTERVAL '1 day'), updated_at = NOW()",
-        [payment.phone, durationDays]
-      );
+      await client.query("INSERT INTO subscriptions (phone, plan, is_active, expires_at) VALUES ($1, 'premium', TRUE, NOW() + ($2 * INTERVAL '1 day')) ON CONFLICT (phone, plan) DO UPDATE SET is_active = TRUE, expires_at = GREATEST(COALESCE(subscriptions.expires_at, NOW()), NOW()) + ($2 * INTERVAL '1 day'), updated_at = NOW()", [payment.phone, durationDays]);
       await client.query("UPDATE manual_payment_requests SET status = 'approved', reviewed_by = $2, reviewed_at = NOW() WHERE id = $1", [ref, String(adminPhone)]);
+      await recordPaymentAudit({ paymentId: ref, action: 'APPROVE', previousStatus: 'pending', newStatus: 'approved', adminPhone, details: `Premium activated for ${payment.phone} (${durationDays} day(s)), txn ${payment.transaction_id}`, client });
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK').catch(() => {});
@@ -206,8 +202,15 @@ export async function approvePayment({ adminPhone, paymentReference }) {
     await subscribeUser({ phone: payment.phone, plan: 'premium', durationDays: payment.durationDays || 7 });
     payment.status = 'approved';
     payment.reviewedBy = String(adminPhone);
+    await recordPaymentAudit({ paymentId: ref, action: 'APPROVE', previousStatus: 'pending', newStatus: 'approved', adminPhone, details: `Premium activated for ${payment.phone} (${payment.durationDays || 7} day(s)), txn ${payment.transactionId}` });
   }
   const durationDays = Number(payment.plan_duration_days || payment.durationDays || 7);
+  try {
+    await markConverted(payment.phone);
+    await notifyCustomerPaymentApproved({ phone: payment.phone, durationDays, reference: ref });
+  } catch (error) {
+    logger.warn({ error, ref }, 'Customer approval notification failed');
+  }
   return '✅ Premium activated for ' + payment.phone + ' for ' + durationDays + ' day(s). Payment reference: ' + ref + '. Approve only after verifying the transaction and amount.';
 }
 
@@ -216,14 +219,18 @@ export async function rejectPayment({ adminPhone, paymentReference }) {
   const ref = Number(paymentReference);
   if (!Number.isSafeInteger(ref) || ref < 1) return 'Usage: REJECT PAYMENT_REFERENCE_NUMBER';
   if (pool) {
-    const result = await pool.query("UPDATE manual_payment_requests SET status = 'rejected', reviewed_by = $2, reviewed_at = NOW() WHERE id = $1 AND status = 'pending' RETURNING phone", [ref, String(adminPhone)]);
+    const result = await pool.query("UPDATE manual_payment_requests SET status = 'rejected', reviewed_by = $2, reviewed_at = NOW() WHERE id = $1 AND status = 'pending' RETURNING phone, transaction_id", [ref, String(adminPhone)]);
     if (!result.rows[0]) return 'No pending payment found for that reference.';
+    await recordPaymentAudit({ paymentId: ref, action: 'REJECT', previousStatus: 'pending', newStatus: 'rejected', adminPhone, details: `Rejected payment for ${result.rows[0].phone}, txn ${result.rows[0].transaction_id}` });
+    try { await notifyCustomerPaymentRejected({ phone: result.rows[0].phone, reference: ref }); } catch (error) { logger.warn({ error, ref }, 'Customer rejection notification failed'); }
     return 'Payment reference ' + ref + ' was rejected. Premium was not activated for ' + result.rows[0].phone + '.';
   }
   const payment = memoryPayments.get(ref);
   if (!payment || payment.status !== 'pending') return 'No pending payment found for that reference.';
   payment.status = 'rejected';
   payment.reviewedBy = String(adminPhone);
+  await recordPaymentAudit({ paymentId: ref, action: 'REJECT', previousStatus: 'pending', newStatus: 'rejected', adminPhone, details: `Rejected payment for ${payment.phone}, txn ${payment.transactionId}` });
+  try { await notifyCustomerPaymentRejected({ phone: payment.phone, reference: ref }); } catch (error) { logger.warn({ error, ref }, 'Customer rejection notification failed'); }
   return 'Payment reference ' + ref + ' was rejected. Premium was not activated for ' + payment.phone + '.';
 }
 
@@ -236,17 +243,12 @@ export async function handlePaymentCommand({ phone, message }) {
     const parts = args.split(/\s+/).filter(Boolean);
     if (!parts.length) return 'Submit your transaction ID with a plan: PAY DAY TRANSACTION_ID, PAY WEEK TRANSACTION_ID, or PAY MONTH TRANSACTION_ID.';
     const first = parts[0].toLowerCase();
-    const hasPlan = ['day', 'week', 'month'].includes(first);
-    if (!hasPlan) return 'Please specify the plan explicitly: PAY DAY TRANSACTION_ID, PAY WEEK TRANSACTION_ID, or PAY MONTH TRANSACTION_ID. No plan is assumed.';
-    const planKey = first;
-    const transactionId = parts.slice(1).join(' ');
-    return submitPaymentProof({ phone, transactionId, planKey });
+    if (!['day', 'week', 'month'].includes(first)) return 'Please specify the plan explicitly: PAY DAY TRANSACTION_ID, PAY WEEK TRANSACTION_ID, or PAY MONTH TRANSACTION_ID. No plan is assumed.';
+    return submitPaymentProof({ phone, transactionId: parts.slice(1).join(' '), planKey: first });
   }
   if (/^(pending|pendingpayments|payments)$/i.test(command)) {
     const requestedPage = args ? Number(args) : 1;
-    if (args && (!/^\d+$/.test(args) || !Number.isSafeInteger(requestedPage) || requestedPage < 1)) {
-      return 'Usage: PENDING [PAGE_NUMBER]';
-    }
+    if (args && (!/^\d+$/.test(args) || !Number.isSafeInteger(requestedPage) || requestedPage < 1)) return 'Usage: PENDING [PAGE_NUMBER]';
     return listPendingPayments({ adminPhone: phone, page: requestedPage });
   }
   if (/^(setplan|changeplan)$/i.test(command)) {

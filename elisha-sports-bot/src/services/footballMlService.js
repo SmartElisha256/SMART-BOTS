@@ -1,11 +1,22 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createCircuitBreaker } from '../utils/circuitBreaker.js';
+import { logger } from '../utils/logger.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const analyticsDir = path.resolve(here, '../../football-analytics');
 const pythonBin = process.env.PYTHON_BIN || 'python3';
-const TIMEOUT_MS = 15000;
+const TIMEOUT_MS = Number(process.env.FOOTBALL_ML_TIMEOUT_MS) > 0
+  ? Number(process.env.FOOTBALL_ML_TIMEOUT_MS)
+  : 20_000;
+
+const mlCircuit = createCircuitBreaker({
+  name: 'football-ml',
+  failureThreshold: 5,
+  resetMs: 60_000,
+  logger
+});
 
 export function detectFootballIntent(input) {
   const original = String(input ?? '').trim();
@@ -18,8 +29,6 @@ export function detectFootballIntent(input) {
     .trim();
   if (!text) return 'unknown';
 
-  // Concept/learning requests take priority unless the user also asks for a
-  // specific match forecast or match-specific/current evidence.
   const conceptIntent = /\b(what is|what are|what does|define|meaning of|explain|teach me|how does|how do|rules of|difference between|why do|how to understand)\b/i.test(text);
   const conceptTerms = /\b(xg|expected goals|btts|double chance|offside|formation|football tactics|pressing|possession|counterattack|counter attack|4-3-3|4-2-3-1|false nine|high line|set pieces?|yellow cards?|red cards?|penalt(?:y|ies)|corner kicks?)\b/i.test(text);
   const matchSeparator = /\b(?:vs\.?|v\.?|versus|against)\b/i.test(text);
@@ -31,20 +40,13 @@ export function detectFootballIntent(input) {
   if (conceptIntent && conceptTerms && !hasTwoTeamShape && !explicitForecast && !explicitData) {
     return 'ai_only';
   }
-
-  // A match-specific answer benefits from verified data first, then the model,
-  // followed by an explanation grounded only in returned evidence.
   if (hasTwoTeamShape && (explicitData || /\b(today|tonight|tomorrow|this week|team stats|statistics|stats|form|h2h|head.to.head|injur(?:y|ies)|lineup|line-ups|squad)\b/i.test(text))) {
     return 'data_ml_ai';
   }
-
-  // Market labels without a named match are underspecified; do not launch a model.
   if (marketTerms && !hasTwoTeamShape && !explicitForecast) return 'unknown';
-
   if (hasTwoTeamShape || (explicitForecast && (marketTerms || /\bmatch|team|teams|football|soccer\b/i.test(text)))) {
     return 'ml_ai';
   }
-
   if (explicitForecast && !hasTwoTeamShape) return 'unknown';
   if (explicitData) return 'data_only';
   if (conceptIntent || conceptTerms || /\b(football|soccer|match|team|player|league|coach|manager|tournament|referee)\b/i.test(text)) {
@@ -53,11 +55,7 @@ export function detectFootballIntent(input) {
   return 'unknown';
 }
 
-export async function predictFootballMatch({ homeTeam, awayTeam, kickoff = null }) {
-  if (!homeTeam || !awayTeam || homeTeam.trim().toLowerCase() === awayTeam.trim().toLowerCase()) {
-    throw new Error('Please provide two different team names.');
-  }
-
+function spawnPredict({ homeTeam, awayTeam, kickoff }) {
   return new Promise((resolve, reject) => {
     const child = spawn(pythonBin, ['predict.py', '--request-stdin'], {
       cwd: analyticsDir,
@@ -97,7 +95,9 @@ export async function predictFootballMatch({ homeTeam, awayTeam, kickoff = null 
       if (settled) return;
       let payload;
       try { payload = JSON.parse(stdout); }
-      catch { return finish(reject, new Error('Python ML dependencies or trained model files are not available on the server.')); }
+      catch {
+        return finish(reject, new Error('Python ML dependencies or trained model files are not available on the server.'));
+      }
       if (code !== 0 || payload.error) {
         return finish(reject, new Error(payload.error || 'Football ML prediction failed.'));
       }
@@ -110,6 +110,14 @@ export async function predictFootballMatch({ homeTeam, awayTeam, kickoff = null 
       kickoff
     }));
   });
+}
+
+export async function predictFootballMatch({ homeTeam, awayTeam, kickoff = null }) {
+  if (!homeTeam || !awayTeam || homeTeam.trim().toLowerCase() === awayTeam.trim().toLowerCase()) {
+    throw new Error('Please provide two different team names.');
+  }
+
+  return mlCircuit.exec(() => spawnPredict({ homeTeam, awayTeam, kickoff }));
 }
 
 export function formatMlPrediction(prediction) {
@@ -141,4 +149,8 @@ export function formatMlPrediction(prediction) {
   if (warnings.length) lines.push('', `Data warnings: ${warnings.join(' ')}`);
   lines.push('', 'These are model estimates, not guarantees. Do not treat them as certain outcomes.');
   return lines.join('\n');
+}
+
+export function getMlCircuitState() {
+  return mlCircuit.getState();
 }

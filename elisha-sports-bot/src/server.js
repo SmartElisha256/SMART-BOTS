@@ -1,14 +1,13 @@
 import { createApp } from './app.js';
-import { env } from './config/env.js';
+import { env, validateEnvironment } from './config/env.js';
 import pool, { testDatabaseConnection } from './database/pool.js';
 import { logger } from './utils/logger.js';
+import { ensureExpiryReminderSchedule } from './jobs/queue.js';
 
 const app = createApp();
 let server;
 
 async function verifyPersistentStorage() {
-  // Premium status and payment requests must survive process restarts in production.
-  // Do not silently run with the in-memory subscription/payment fallbacks there.
   if (!process.env.DATABASE_URL || !pool) {
     throw new Error('Production requires DATABASE_URL for persistent subscriptions and payment records.');
   }
@@ -29,9 +28,18 @@ async function verifyPersistentStorage() {
 }
 
 async function startServer() {
+  const status = validateEnvironment();
+  logger.info({ environment: status.environment, messagingProvider: status.messagingProvider }, 'Environment validated');
+
   if (env.NODE_ENV === 'production') {
     await verifyPersistentStorage();
     logger.info('Persistent subscription and payment storage verified');
+  }
+
+  try {
+    await ensureExpiryReminderSchedule();
+  } catch (error) {
+    logger.warn({ error }, 'Expiry reminder schedule not started (Redis may be down)');
   }
 
   server = app.listen(env.PORT, () => {
