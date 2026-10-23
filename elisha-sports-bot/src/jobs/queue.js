@@ -45,10 +45,6 @@ export async function addNotificationJob({ phone, text }) {
   }
 }
 
-/**
- * Heavy ANALYZE / TIP work runs off the webhook path so Meta does not retry.
- * The worker delivers the final WhatsApp reply when finished.
- */
 export async function addAnalysisJob({ phone, kind, args, provider = 'whatsapp' }) {
   if (!sportsQueue) {
     return { ok: false, queued: false, reason: 'Redis not configured' };
@@ -63,7 +59,6 @@ export async function addAnalysisJob({ phone, kind, args, provider = 'whatsapp' 
         backoff: { type: 'exponential', delay: 2000 },
         removeOnComplete: 100,
         removeOnFail: 50,
-        // Avoid stacking identical analysis for the same user within a short window.
         jobId: `analysis:${phone}:${kind}:${String(args ?? '').toLowerCase().slice(0, 80)}`
       }
     );
@@ -71,12 +66,33 @@ export async function addAnalysisJob({ phone, kind, args, provider = 'whatsapp' 
     logger.info({ jobId: job.id, phone, kind }, 'Analysis job enqueued');
     return { ok: true, queued: true, jobId: job.id };
   } catch (error) {
-    // BullMQ rejects duplicate jobId while active; treat as already queued.
     if (String(error.message || '').includes('Job') && String(error.message || '').includes('exists')) {
       return { ok: true, queued: true, deduped: true };
     }
     logger.error({ phone, kind, error: error.message }, 'Failed to enqueue analysis job');
     throw error;
+  }
+}
+
+/** Schedule repeating Premium expiry reminders (every hour). Call once at startup. */
+export async function ensureExpiryReminderSchedule() {
+  if (!sportsQueue) return { ok: false, reason: 'Redis not configured' };
+  try {
+    await sportsQueue.add(
+      'premium-expiry-reminders',
+      {},
+      {
+        repeat: { every: 60 * 60 * 1000 },
+        jobId: 'repeat:premium-expiry-reminders',
+        removeOnComplete: true,
+        removeOnFail: 20
+      }
+    );
+    logger.info('Premium expiry reminder schedule ensured (hourly)');
+    return { ok: true };
+  } catch (error) {
+    logger.warn({ error: error.message }, 'Could not ensure expiry reminder schedule');
+    return { ok: false, error: error.message };
   }
 }
 

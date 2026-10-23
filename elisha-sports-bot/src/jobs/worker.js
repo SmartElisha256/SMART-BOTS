@@ -5,6 +5,7 @@ import { logger } from '../utils/logger.js';
 import { createMessagingAdapter } from '../providers/messaging/factory.js';
 import { runAnalyzeCommand, runTipCommand } from '../commands/analyzeCommand.js';
 import { recordOutgoingMessage } from '../services/usageService.js';
+import { sendPremiumExpiryReminders } from '../services/expiryReminderService.js';
 
 const connection = env.REDIS_URL
   ? new IORedis(env.REDIS_URL, { maxRetriesPerRequest: null })
@@ -32,9 +33,9 @@ async function processJob(job) {
     let text;
     try {
       if (kind === 'tip') {
-        text = await runTipCommand();
+        text = await runTipCommand({ phone });
       } else {
-        text = await runAnalyzeCommand(args);
+        text = await runAnalyzeCommand(args, { phone });
       }
     } catch (error) {
       logger.error({ error, phone, kind }, 'Analysis job failed');
@@ -52,6 +53,10 @@ async function processJob(job) {
       logger.warn({ error, phone }, 'Could not record outgoing analysis usage');
     }
     return { ok: true, type: 'analysis', kind };
+  }
+
+  if (job.name === 'premium-expiry-reminders') {
+    return sendPremiumExpiryReminders();
   }
 
   logger.warn({ jobName: job.name }, 'Unknown job type');

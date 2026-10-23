@@ -18,6 +18,7 @@ import {
 } from '../commands/sportsCommands.js';
 import { runAnalyzeCommand, runTipCommand } from '../commands/analyzeCommand.js';
 import { addAnalysisJob, isQueueAvailable } from '../jobs/queue.js';
+import { maybeAppendUpgradePrompt } from './conversionService.js';
 
 const commandRequestSchema = z.object({
   sender: z.string().min(5),
@@ -56,8 +57,33 @@ async function dispatchHeavyAnalysis({ sender, kind, args, provider }) {
     }
   }
 
-  if (kind === 'tip') return runTipCommand();
-  return runAnalyzeCommand(args);
+  if (kind === 'tip') return runTipCommand({ phone: sender });
+  return runAnalyzeCommand(args, { phone: sender });
+}
+
+async function handleTeamCommand(sender, args) {
+  const team = String(args ?? '').trim();
+  if (!team) {
+    const prefs = await getUserPreferences(sender);
+    if (prefs?.preferred_team) {
+      return (
+        '⭐ Your favourite team: ' + prefs.preferred_team +
+        '\n\nTry: FORM ' + prefs.preferred_team +
+        '\nOr: FIXTURES\nClear with: TEAM CLEAR'
+      );
+    }
+    return 'Set a favourite team: TEAM Arsenal\nThen use FORM / FIXTURES more easily. Clear with TEAM CLEAR.';
+  }
+  if (/^(clear|none|remove)$/i.test(team)) {
+    await updateUserPreferences(sender, { preferred_team: null });
+    return 'Favourite team cleared.';
+  }
+  await updateUserPreferences(sender, { preferred_team: team });
+  return (
+    '⭐ Favourite team saved: ' + team +
+    '\n\nQuick actions:\n• FORM ' + team +
+    '\n• Ask: How is ' + team + ' doing?'
+  );
 }
 
 export { parseCommand, interpretNaturalLanguage } from '../commands/intentParser.js';
@@ -69,92 +95,129 @@ export async function processIncomingMessage(input) {
     const { command, args, raw } = parseCommand(payload.message);
 
     await upsertUser({ phone: sender, provider: payload.provider });
-    await getUserPreferences(sender);
+    const prefs = await getUserPreferences(sender);
 
     logger.info(
       { phone: sender, command, args, provider: payload.provider },
       'Processing incoming message'
     );
 
+    let reply;
+
     if (!command) {
       const aiReply = await getFootballAssistantReply(raw);
-      if (aiReply) return aiReply;
-      return getFriendlyFallback();
-    }
+      reply = aiReply || getFriendlyFallback();
+    } else {
+      switch (command) {
+        case 'menu':
+          reply = getMenuMessage();
+          break;
 
-    switch (command) {
-      case 'menu':
-        return getMenuMessage();
+        case 'help':
+          reply = getHelpMessage();
+          break;
 
-      case 'help':
-        return getHelpMessage();
+        case 'upgrade':
+          reply = 'Reply UPGRADE to see Premium plans and payment instructions.';
+          break;
 
-      case 'upgrade':
-        return 'Reply UPGRADE to see Premium plans and payment instructions.';
+        case 'leagues':
+        case 'league':
+          reply = handleLeaguesCommand();
+          break;
 
-      case 'leagues':
-      case 'league':
-        return handleLeaguesCommand();
+        case 'team':
+        case 'myteam':
+          reply = await handleTeamCommand(sender, args);
+          break;
 
-      case 'football_help': {
-        if (detectFootballIntent(raw) === 'ml_ai') {
-          return 'Please include the two teams for a match prediction, for example: Arsenal vs Chelsea, who might win?';
+        case 'football_help': {
+          if (detectFootballIntent(raw) === 'ml_ai') {
+            reply = 'Please include the two teams for a match prediction, for example: Arsenal vs Chelsea, who might win?';
+          } else {
+            const aiReply = await getFootballAssistantReply(raw);
+            reply = aiReply || getFriendlyFallback();
+          }
+          break;
         }
-        const aiReply = await getFootballAssistantReply(raw);
-        return aiReply || getFriendlyFallback();
+
+        case 'fixtures':
+          reply = await handleFixturesCommand(args);
+          break;
+
+        case 'tip':
+        case 'tips':
+          reply = await dispatchHeavyAnalysis({
+            sender,
+            kind: 'tip',
+            args: null,
+            provider: payload.provider
+          });
+          break;
+
+        case 'live':
+          reply = await handleLiveCommand(args);
+          break;
+
+        case 'table':
+          reply = await handleTableCommand(args);
+          break;
+
+        case 'form': {
+          const teamArg = args || prefs?.preferred_team;
+          reply = await handleFormCommand(teamArg);
+          break;
+        }
+
+        case 'h2h':
+          reply = await handleH2HCommand(args);
+          break;
+
+        case 'analyze':
+        case 'analysis':
+          if (!(await hasActivePremiumSubscription(sender))) {
+            reply = premiumRequiredMessage();
+          } else {
+            reply = await dispatchHeavyAnalysis({
+              sender,
+              kind: 'analyze',
+              args,
+              provider: payload.provider
+            });
+          }
+          break;
+
+        case 'season':
+        case 'historical':
+          if (!(await hasActivePremiumSubscription(sender))) {
+            reply = premiumRequiredMessage();
+          } else {
+            reply = await handleSeasonCommand(args);
+          }
+          break;
+
+        case 'start':
+          await updateUserPreferences(sender, { notifications_enabled: true });
+          reply = 'Notifications enabled. You will now receive match alerts.';
+          break;
+
+        case 'stop':
+          await updateUserPreferences(sender, { notifications_enabled: false });
+          reply = 'Notifications disabled. You will not receive match alerts.';
+          break;
+
+        default:
+          logger.warn({ phone: sender, command }, 'Unknown command');
+          reply = `Unknown command: "${raw}". Reply with MENU or HELP.`;
       }
-
-      case 'fixtures':
-        return await handleFixturesCommand(args);
-
-      case 'tip':
-      case 'tips':
-        return await dispatchHeavyAnalysis({
-          sender,
-          kind: 'tip',
-          args: null,
-          provider: payload.provider
-        });
-
-      case 'live':
-        return await handleLiveCommand(args);
-
-      case 'table':
-        return await handleTableCommand(args);
-
-      case 'form':
-        return await handleFormCommand(args);
-
-      case 'h2h':
-        return await handleH2HCommand(args);
-
-      case 'analyze':
-      case 'analysis':
-        if (!(await hasActivePremiumSubscription(sender))) return premiumRequiredMessage();
-        return await dispatchHeavyAnalysis({
-          sender,
-          kind: 'analyze',
-          args,
-          provider: payload.provider
-        });
-
-      case 'season':
-      case 'historical':
-        if (!(await hasActivePremiumSubscription(sender))) return premiumRequiredMessage();
-        return await handleSeasonCommand(args);
-
-      case 'start':
-        await updateUserPreferences(sender, { notifications_enabled: true });
-        return 'Notifications enabled. You will now receive match alerts.';
-
-      case 'stop':
-        await updateUserPreferences(sender, { notifications_enabled: false });
-        return 'Notifications disabled. You will not receive match alerts.';
-
-      default:
-        logger.warn({ phone: sender, command }, 'Unknown command');
-        return `Unknown command: "${raw}". Reply with MENU or HELP.`;
     }
+
+    // Soft conversion prompt for free users after several useful replies
+    if (command && !['upgrade', 'menu', 'help'].includes(command)) {
+      reply = await maybeAppendUpgradePrompt(sender, reply);
+    }
+
+    return reply;
   } catch (error) {
     logger.error({ error }, 'Error processing incoming message');
     return 'An error occurred. Please try again later.';
