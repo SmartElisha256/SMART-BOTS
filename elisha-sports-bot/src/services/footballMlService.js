@@ -35,7 +35,7 @@ export function detectFootballIntent(input) {
   const explicitForecast = /\b(predict|prediction|forecast|who will win|who might win|who wins|chance of winning|chance of a draw|match analysis|analy[sz]e|compare these teams|compare the teams|tips? today|today'?s? tips?)\b/i.test(text);
   const explicitData = /\b(live|right now|currently|latest|recent|last \d+|last five|last five games|form|head.to.head|h2h|standings|league table|table position|injur(?:y|ies)|squad news|team news|lineup|line-ups|starting eleven|shots|shots on target|possession stats|current score|live score|fixture|fixtures|upcoming match|historical record|recent results)\b/i.test(text);
   const hasTwoTeamShape = matchSeparator && text.split(/\b(?:vs\.?|v\.?|versus|against)\b/i).length >= 2;
-  const marketTerms = /\b(1x2|double chance|over\s*\/?\s*under|btts|both teams to score|correct score|expected goals|xg|probabilit(?:y|ies)|goal markets?)\b/i.test(text);
+  const marketTerms = /\b(1x2|double chance|draw no bet|dnb|over\s*\/?\s*under|btts|both teams to score|correct score|expected goals|xg|probabilit(?:y|ies)|goal markets?|match probabilities|clean sheet|all markets?)\b/i.test(text);
 
   if (conceptIntent && conceptTerms && !hasTwoTeamShape && !explicitForecast && !explicitData) {
     return 'ai_only';
@@ -121,7 +121,11 @@ export async function predictFootballMatch({ homeTeam, awayTeam, kickoff = null 
 }
 
 export function formatMlPrediction(prediction) {
-  const pct = value => `${(Number(value) * 100).toFixed(1)}%`;
+  const pct = (value) => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return 'n/a';
+    return `${(n * 100).toFixed(1)}%`;
+  };
   const result = prediction.match_result ?? {};
   const ml = prediction.machine_learning_result ?? {};
   const dc = prediction.double_chance ?? {};
@@ -131,23 +135,57 @@ export function formatMlPrediction(prediction) {
   const scores = prediction.correct_score ?? [];
   const fixture = prediction.fixture ?? {};
   const warnings = prediction.data_quality?.warnings ?? [];
+  const dnb = prediction.draw_no_bet ?? {};
+  const team = prediction.team_scoring ?? {};
+  const ranges = prediction.goal_ranges ?? {};
+  const ht = prediction.half_time ?? {};
+
+  const scoreLine = scores
+    .slice(0, 5)
+    .map((s) => {
+      if (s.score) return `${s.score} (${pct(s.probability)})`;
+      return `${s.home}-${s.away} (${pct(s.probability)})`;
+    })
+    .join(', ');
+
   const lines = [
-    `📊 ML MATCH PREDICTION: ${fixture.home_team ?? 'Home'} vs ${fixture.away_team ?? 'Away'}`,
+    '📊 ELISHA SPORTS BOT — MATCH ANALYSIS',
+    `${fixture.home_team ?? 'Home'} vs ${fixture.away_team ?? 'Away'}`,
     '',
-    `1X2 (score model): Home ${pct(result.home_win)} | Draw ${pct(result.draw)} | Away ${pct(result.away_win)}`,
-    `ML classifier comparison: Home ${pct(ml.home_win)} | Draw ${pct(ml.draw)} | Away ${pct(ml.away_win)}`,
-    `Double chance: 1X ${pct(dc['1X'])} | X2 ${pct(dc.X2)} | 12 ${pct(dc['12'])}`,
-    `Over 1.5: ${pct(goals.over_1_5)} | Over 2.5: ${pct(goals.over_2_5)} | Under 2.5: ${pct(goals.under_2_5)}`,
-    `BTTS: Yes ${pct(btts.yes)} | No ${pct(btts.no)}`,
-    `Expected goals: ${fixture.home_team ?? 'Home'} ${Number(xg.home).toFixed(2)} - ${Number(xg.away).toFixed(2)} ${fixture.away_team ?? 'Away'}`,
-    `Top correct-score estimates: ${scores.slice(0, 3).map(item => `${item.score} (${pct(item.probability)})`).join(', ') || 'unavailable'}`,
+    'Match outcome (Poisson score model)',
+    `• Home win: ${pct(result.home_win)}`,
+    `• Draw: ${pct(result.draw)}`,
+    `• Away win: ${pct(result.away_win)}`,
+    `• Double chance — 1X: ${pct(dc['1X'])} | X2: ${pct(dc.X2)} | 12: ${pct(dc['12'])}`,
+    `• Draw no bet — Home: ${pct(dnb.home)} | Away: ${pct(dnb.away)} (push if draw ~ ${pct(dnb.push_probability)})`,
+    '',
+    'Goals',
+    `• Over 1.5: ${pct(goals.over_1_5)} | Under 1.5: ${pct(goals.under_1_5)}`,
+    `• Over 2.5: ${pct(goals.over_2_5)} | Under 2.5: ${pct(goals.under_2_5)}`,
+    `• Over 3.5: ${pct(goals.over_3_5)} | Under 3.5: ${pct(goals.under_3_5)}`,
+    `• BTTS Yes: ${pct(btts.yes)} | No: ${pct(btts.no)}`,
+    `• Goal range 0–1: ${pct(ranges['0_1'])} | 2–3: ${pct(ranges['2_3'])} | 4+: ${pct(ranges['4_plus'])}`,
+    '',
+    'Team scoring',
+    `• Home scores: ${pct(team.home_scores)} | Away scores: ${pct(team.away_scores)}`,
+    `• Home clean sheet: ${pct(team.home_clean_sheet)} | Away clean sheet: ${pct(team.away_clean_sheet)}`,
+    '',
+    'Goal expectations',
+    `• Home xG: ${Number(xg.home ?? 0).toFixed(2)} | Away xG: ${Number(xg.away ?? 0).toFixed(2)} | Total: ${Number(xg.total ?? (Number(xg.home || 0) + Number(xg.away || 0))).toFixed(2)}`,
+    scoreLine ? `• Most likely scores: ${scoreLine}` : null,
+    '',
+    'Classifier 1X2 (separate from Poisson markets)',
+    `• ML Home: ${pct(ml.home_win)} | Draw: ${pct(ml.draw)} | Away: ${pct(ml.away_win)}`,
+    '',
     `Confidence: ${prediction.confidence?.level ?? 'unavailable'}; historical matches: ${prediction.data_quality?.historical_matches ?? 'unknown'}`,
-    `Historical data range: ${prediction.data_quality?.history_date_range?.from ?? 'unknown'} to ${prediction.data_quality?.history_date_range?.to ?? 'unknown'}`,
-    `Model features: ${(prediction.features_used?.model_features ?? []).join(', ') || 'not reported'}`,
-    `Player data used by ML model: ${prediction.features_used?.player_data_in_model === true ? 'yes' : 'no — checked separately in team context'}`
-  ];
-  if (warnings.length) lines.push('', `Data warnings: ${warnings.join(' ')}`);
-  lines.push('', 'These are model estimates, not guarantees. Do not treat them as certain outcomes.');
+    `Data: ${prediction.data_quality?.history_date_range?.from ?? '?'} → ${prediction.data_quality?.history_date_range?.to ?? '?'}`,
+    `Model: ${prediction.model?.version ?? prediction.model?.name ?? 'unknown'}`,
+    ht.available === false ? `Half-time markets: unavailable — ${ht.reason || 'no HT model'}` : null,
+    warnings.length ? `Warnings: ${warnings.join(' | ')}` : null,
+    '',
+    'Estimates only — not betting advice. Odds were not checked unless you supply them.'
+  ].filter(Boolean);
+
   return lines.join('\n');
 }
 
