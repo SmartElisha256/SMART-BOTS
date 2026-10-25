@@ -23,7 +23,7 @@ def main():
 
     raw = load_matches(args.data)
     if "source" in raw.columns and raw["source"].astype(str).str.lower().eq("synthetic").any():
-        raise SystemExit("Refusing to report real-world evaluation on synthetic-only data.")
+        raise SystemExit("Refusing to report real-world evaluation when any synthetic rows are present.")
     frame = build_training_frame(raw).sort_values("match_date", kind="stable").reset_index(drop=True)
     frame["season_key"] = frame["match_date"].apply(
         lambda ts: f"{ts.year}-{ts.year+1}" if ts.month >= 8 else f"{ts.year-1}-{ts.year}"
