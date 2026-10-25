@@ -24,7 +24,7 @@ def main():
     args = parser.parse_args()
 
     raw = load_matches(args.data)
-    if "source" in raw.columns and (raw["source"] == "synthetic").all():
+    if "source" in raw.columns and raw["source"].astype(str).str.lower().eq("synthetic").any():
         raise SystemExit("Refusing to train on synthetic-only data. Use real season CSVs.")
 
     frame = build_training_frame(raw).sort_values("match_date", kind="stable").reset_index(drop=True)
