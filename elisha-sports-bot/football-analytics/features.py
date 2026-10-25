@@ -67,9 +67,15 @@ def load_matches(path: str | Path) -> pd.DataFrame:
             if (numeric.dropna() < 0).any():
                 raise DataQualityError(f"{col} cannot contain negative statistics.")
             df[col] = numeric
-    duplicate_key = ["match_date", "home_team", "away_team"]
-    if df.duplicated(duplicate_key).any():
-        raise DataQualityError("Duplicate fixtures found (same date and teams).")
+    # Treat a UTC calendar day and case-insensitive team names as the fixture
+    # identity so timestamp/capitalization variants cannot bypass duplicate checks.
+    duplicate_key = pd.DataFrame({
+        "match_day": df["match_date"].dt.normalize(),
+        "home_team_key": df["home_team"].str.casefold(),
+        "away_team_key": df["away_team"].str.casefold(),
+    })
+    if duplicate_key.duplicated().any():
+        raise DataQualityError("Duplicate fixtures found (same calendar date and teams, ignoring case).")
     return df.sort_values("match_date", kind="stable").reset_index(drop=True)
 
 

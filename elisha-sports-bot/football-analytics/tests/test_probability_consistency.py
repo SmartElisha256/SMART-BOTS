@@ -75,4 +75,4 @@ def test_primary_result_markets_match_poisson_score_model(tmp_path, monkeypatch)
         + result["machine_learning_result"]["away_win"]
     )
     assert ml_sum == pytest.approx(1.0)
-    assert result["data_quality"]["status"] in {"ok", "limited"}
+    assert result["data_quality"]["status"] in {"ok", "limited", "stale"}

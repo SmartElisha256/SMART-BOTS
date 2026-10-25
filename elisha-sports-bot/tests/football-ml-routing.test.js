@@ -32,3 +32,17 @@ test('ML prediction formatter safely renders supported output', () => {
   assert.match(text, /BTTS Yes: 60\.0%/);
   assert.match(text, /not betting advice|not guarantees/);
 });
+
+
+test('ML formatter does not invent probabilities when a fixture is unavailable', () => {
+  const text = formatMlPrediction({
+    prediction_available: false,
+    unavailable_reason: 'Insufficient pre-kickoff history for: Unknown FC',
+    fixture: { home_team: 'Unknown FC', away_team: 'Chelsea' },
+    data_quality: { status: 'unavailable', warnings: ['No completed pre-kickoff matches found.'] }
+  });
+  assert.match(text, /Prediction unavailable/);
+  assert.match(text, /Unknown FC/);
+  assert.match(text, /No match probabilities were generated/);
+  assert.doesNotMatch(text, /Home win: [0-9]/);
+});

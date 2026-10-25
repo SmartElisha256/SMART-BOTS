@@ -55,6 +55,14 @@ def predict(payload: dict, data_path="data/epl_historical.csv", models_dir="mode
     kickoff = payload.get("kickoff")
     if kickoff is not None and not isinstance(kickoff, str):
         raise ValueError("kickoff must be an ISO date/time string or null.")
+    if kickoff is not None:
+        try:
+            parsed_kickoff = pd.to_datetime(kickoff, utc=True, errors="raise")
+            if pd.isna(parsed_kickoff):
+                raise ValueError("kickoff is not a valid timestamp")
+            kickoff = parsed_kickoff.isoformat()
+        except Exception as exc:
+            raise ValueError("kickoff must be a valid ISO date/time timestamp.") from exc
 
     raw = load_matches(data_path)
     models = Path(models_dir)
@@ -72,6 +80,23 @@ def predict(payload: dict, data_path="data/epl_historical.csv", models_dir="mode
     feature_names = list(result_artifact.get("features") or FEATURES)
 
     feat = features_for_fixture(raw, home, away, kickoff=kickoff)
+    if feat.get("home_matches_seen", 0) == 0 or feat.get("away_matches_seen", 0) == 0:
+        missing_teams = []
+        if feat.get("home_matches_seen", 0) == 0:
+            missing_teams.append(home)
+        if feat.get("away_matches_seen", 0) == 0:
+            missing_teams.append(away)
+        return {
+            "prediction_available": False,
+            "unavailable_reason": "Insufficient pre-kickoff history for: " + ", ".join(missing_teams),
+            "fixture": {"home_team": home, "away_team": away, "competition": payload.get("competition"), "kickoff": kickoff},
+            "data_quality": {
+                "status": "unavailable",
+                "historical_matches": int(len(raw)),
+                "history_date_range": {"from": str(raw["match_date"].min().date()), "to": str(raw["match_date"].max().date())},
+                "warnings": ["No completed pre-kickoff matches found for one or both team names; predictions were not generated."],
+            },
+        }
     X = pd.DataFrame([{name: float(feat.get(name, 0.0)) for name in feature_names}])[feature_names]
 
     proba = classifier.predict_proba(X)[0]
@@ -117,11 +142,20 @@ def predict(payload: dict, data_path="data/epl_historical.csv", models_dir="mode
         warnings.append("Limited form history for one or both teams.")
     if feat.get("h2h_matches", 0) < 1:
         warnings.append("No head-to-head meetings in the training history window.")
+    as_of = pd.to_datetime(kickoff, utc=True) if kickoff else pd.Timestamp.now(tz="UTC")
+    prior_dates = raw.loc[raw["match_date"] < as_of, "match_date"]
+    latest_prior = prior_dates.max() if not prior_dates.empty else None
+    data_age_days = int((as_of - latest_prior).total_seconds() // 86400) if latest_prior is not None else None
+    if data_age_days is None or data_age_days > 90:
+        warnings.append("Historical dataset is stale for this prediction cutoff; verify newer licensed results before relying on estimates.")
+    if grid_meta.get("warning"):
+        warnings.append(grid_meta["warning"])
 
     top_prob = max(result_probs.values())
     conf_level = _confidence_level(top_prob, len(raw), is_synthetic)
 
     return {
+        "prediction_available": True,
         "fixture": {
             "home_team": home,
             "away_team": away,
@@ -129,8 +163,10 @@ def predict(payload: dict, data_path="data/epl_historical.csv", models_dir="mode
             "kickoff": kickoff,
         },
         "data_quality": {
-            "status": "synthetic" if is_synthetic else ("ok" if len(raw) >= 200 else "limited"),
+            "status": "synthetic" if is_synthetic else ("stale" if data_age_days is None or data_age_days > 90 else ("ok" if len(raw) >= 200 else "limited")),
             "historical_matches": int(len(raw)),
+            "last_match_date": str(raw["match_date"].max().date()),
+            "data_age_days_at_cutoff": data_age_days,
             "history_date_range": {
                 "from": str(raw["match_date"].min().date()),
                 "to": str(raw["match_date"].max().date()),
@@ -161,7 +197,7 @@ def predict(payload: dict, data_path="data/epl_historical.csv", models_dir="mode
         "half_time": markets["half_time"],
         "first_team_to_score": markets["first_team_to_score"],
         "market_rows": market_rows_for_display(markets),
-        "markets_meta": markets["meta"],
+        "markets_meta": {**markets["meta"], "poisson_grid": grid_meta},
         "team_form": {
             "home": team_form(raw, home, as_of=kickoff),
             "away": team_form(raw, away, as_of=kickoff),

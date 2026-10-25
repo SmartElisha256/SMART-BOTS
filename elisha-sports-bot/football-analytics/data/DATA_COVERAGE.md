@@ -15,3 +15,8 @@ Run `prepare_epl_data.py` after adding new season files, then retrain with `trai
 
 `synthetic_matches.csv` and `unit_test_historical_mini.csv` are for tests only.
 `train.py` refuses synthetic-only training.
+
+
+## Current-data status and provider setup
+
+Bundled history ends in 2024/25. There is no provider URL, API key, or licensed current-season feed configured in the repository by default. To append newer completed results, configure the optional workflow documented in `../README.md`; it writes a separate `provider_matches.csv`, records a freshness manifest, and only includes provider rows strictly newer than the bundled date range. Predictions must expose stale-data warnings when the latest available result is too old for the requested cutoff. A provider update is not verified until its source, licence, coverage, and resulting date range have been checked.

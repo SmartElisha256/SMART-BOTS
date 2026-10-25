@@ -102,3 +102,57 @@ def test_invalid_xg_rejected():
 def test_top_score_note_present():
     markets = markets_from_score_matrix(_matrix(), 1.4, 1.1)
     assert "mode" in markets["correct_score_note"].lower() or "rank" in markets["correct_score_note"].lower()
+
+
+def test_adaptive_grid_reports_cap_tolerance_failure_and_tail_at_actual_cap():
+    import warnings
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        matrix, meta = build_poisson_score_matrix(
+            18.0, 18.0, residual_tol=1e-12, max_goals_cap=3
+        )
+    expected_mass = sum(
+        poisson_pmf(h, 18.0) * poisson_pmf(a, 18.0)
+        for h in range(4) for a in range(4)
+    )
+    assert meta["max_goals_per_team"] == 3
+    assert meta["raw_mass_before_norm"] == pytest.approx(expected_mass, rel=1e-8)
+    assert meta["omitted_tail_mass_estimate"] == pytest.approx(1 - expected_mass, abs=1e-8)
+    assert meta["tolerance_met"] is False
+    assert meta["cap_reached"] is True
+    assert meta["warning"]
+    assert caught and any(issubclass(w.category, RuntimeWarning) for w in caught)
+    assert sum(matrix.values()) == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize("home_xg,away_xg", [(0.0, 0.0), (1.4, 1.1), (4.5, 3.8)])
+def test_adaptive_grid_valid_for_low_normal_and_extreme_rates(home_xg, away_xg):
+    matrix, meta = build_poisson_score_matrix(home_xg, away_xg)
+    assert all(0 <= p <= 1 for p in matrix.values())
+    assert sum(matrix.values()) == pytest.approx(1.0, abs=1e-9)
+    assert 0 <= meta["omitted_tail_mass_estimate"] <= 1
+    assert meta["tolerance_met"] == (meta["omitted_tail_mass_estimate"] < meta["residual_tol"])
+
+
+@pytest.mark.parametrize("home_xg,away_xg", [(-0.1, 1.0), (float("nan"), 1.0), (21.0, 1.0)])
+def test_invalid_expected_goals_rejected(home_xg, away_xg):
+    with pytest.raises(ValueError):
+        build_poisson_score_matrix(home_xg, away_xg)
+
+
+def test_invalid_grid_configuration_rejected():
+    with pytest.raises(ValueError):
+        build_poisson_score_matrix(1.2, 1.0, residual_tol=0)
+    with pytest.raises(ValueError):
+        build_poisson_score_matrix(1.2, 1.0, max_goals_cap=0)
+    with pytest.raises(ValueError):
+        build_poisson_score_matrix(1.2, 1.0, max_goals=9, max_goals_cap=8)
+
+
+def test_market_derivation_rejects_invalid_expected_goals_and_score_probabilities():
+    with pytest.raises(ValueError, match="home_xg"):
+        markets_from_score_matrix({(0, 0): 1.0}, float("nan"), 1.0)
+    with pytest.raises(ValueError, match="probabilities"):
+        markets_from_score_matrix({(0, 0): -0.1, (1, 0): 1.1}, 1.0, 1.0)
+    with pytest.raises(ValueError, match="keys"):
+        markets_from_score_matrix({(-1, 0): 1.0}, 1.0, 1.0)
