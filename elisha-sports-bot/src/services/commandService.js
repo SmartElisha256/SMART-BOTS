@@ -24,7 +24,7 @@ import { submitFeedback } from './feedbackService.js';
 const commandRequestSchema = z.object({
   sender: z.string().min(5),
   message: z.string().trim().default(''),
-  provider: z.enum(['whatsapp', 'callmebot', 'mock']).default('whatsapp')
+  provider: z.enum(['whatsapp', 'mock']).default('whatsapp')
 });
 
 async function getFootballAssistantReply(question) {

@@ -3,7 +3,7 @@ import pool from '../database/pool.js';
 
 const userSchema = z.object({
   phone: z.string().min(5),
-  provider: z.enum(['whatsapp', 'callmebot', 'mock']).default('whatsapp')
+  provider: z.enum(['whatsapp', 'mock']).default('whatsapp')
 });
 
 const inMemoryUsers = new Map();
