@@ -121,6 +121,21 @@ export async function predictFootballMatch({ homeTeam, awayTeam, kickoff = null 
 }
 
 export function formatMlPrediction(prediction) {
+  if (prediction?.prediction_available === false) {
+    const fixture = prediction.fixture ?? {};
+    const warnings = prediction.data_quality?.warnings ?? [];
+    return [
+      '📊 ELISHA SPORTS BOT — MATCH ANALYSIS',
+      `${fixture.home_team ?? 'Home'} vs ${fixture.away_team ?? 'Away'}`,
+      '',
+      'Prediction unavailable',
+      prediction.unavailable_reason ?? 'The available historical data is insufficient for a reliable estimate.',
+      'No match probabilities were generated.',
+      warnings.length ? `Data-quality warnings: ${warnings.join(' | ')}` : null,
+      '',
+      'Verify team names and the availability of completed historical results before retrying.'
+    ].filter(Boolean).join('\\n');
+  }
   const pct = (value) => {
     const n = Number(value);
     if (!Number.isFinite(n)) return 'n/a';
