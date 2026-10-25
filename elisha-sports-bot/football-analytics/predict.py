@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from features import FEATURES, features_for_fixture, load_matches, team_form
-from markets import markets_from_score_matrix, market_rows_for_display
+from markets import markets_from_score_matrix, market_rows_for_display, build_poisson_score_matrix
 
 
 def poisson_pmf(k: int, rate: float) -> float:
@@ -89,21 +89,28 @@ def predict(payload: dict, data_path="data/epl_historical.csv", models_dir="mode
     home_xg = float(max(0.05, min(5.0, home_model.predict(X)[0])))
     away_xg = float(max(0.05, min(5.0, away_model.predict(X)[0])))
 
-    score_matrix = {}
-    max_goals = 7
-    for hg in range(0, max_goals + 1):
-        for ag in range(0, max_goals + 1):
-            score_matrix[(hg, ag)] = poisson_pmf(hg, home_xg) * poisson_pmf(ag, away_xg)
-    total_p = sum(score_matrix.values()) or 1.0
-    score_matrix = {k: v / total_p for k, v in score_matrix.items()}
+    score_matrix, grid_meta = build_poisson_score_matrix(home_xg, away_xg)
+    max_goals = int(grid_meta["max_goals_per_team"])
 
-    markets = markets_from_score_matrix(score_matrix, home_xg, away_xg, max_goals=max_goals)
+    markets = markets_from_score_matrix(
+        score_matrix, home_xg, away_xg, max_goals=max_goals, grid_meta=grid_meta
+    )
     result_probs = markets["match_result"]
     scores = markets["correct_score"]
     goal_lines = markets["goal_markets"]
 
     is_synthetic = bool(result_artifact.get("synthetic_data"))
     warnings = []
+    if kickoff:
+        try:
+            ko = pd.to_datetime(kickoff, utc=True)
+            if ko < pd.Timestamp.now(tz="UTC") - pd.Timedelta(hours=3):
+                warnings.append(
+                    "Kickoff is in the past relative to server time; this is a historical-style "
+                    "estimate using only features available before that kickoff, not a live forecast."
+                )
+        except Exception:
+            warnings.append("Kickoff timestamp could not be parsed; treat timing context as uncertain.")
     if is_synthetic:
         warnings.append("Model was trained on synthetic data.")
     if feat.get("home_matches_seen", 0) < 3 or feat.get("away_matches_seen", 0) < 3:
@@ -150,6 +157,7 @@ def predict(payload: dict, data_path="data/epl_historical.csv", models_dir="mode
         "team_scoring": markets["team_scoring"],
         "expected_goals": markets["expected_goals"],
         "correct_score": scores[:8],
+        "correct_score_note": markets.get("correct_score_note"),
         "half_time": markets["half_time"],
         "first_team_to_score": markets["first_team_to_score"],
         "market_rows": market_rows_for_display(markets),
