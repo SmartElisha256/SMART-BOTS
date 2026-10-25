@@ -10,6 +10,7 @@ import {
 import { afterPaymentApproved, afterPaymentRejected } from '../services/paymentNotifyHook.js';
 import { getUserSubscriptions } from '../services/subscriptionService.js';
 import { getPredictionAccuracySummary } from '../services/predictionLogService.js';
+import { listFeedback, markFeedbackReviewed } from '../services/feedbackService.js';
 import pool from '../database/pool.js';
 import { env } from '../config/env.js';
 import { getQueueStats } from '../jobs/queue.js';
@@ -40,6 +41,19 @@ adminRouter.get('/api/status', async (req, res) => {
       ai: getAiCircuitState()
     }
   });
+});
+
+adminRouter.get('/api/feedback', async (req, res) => {
+  const status = req.query.status ? String(req.query.status) : null;
+  const limit = Number(req.query.limit) || 30;
+  const rows = await listFeedback({ status, limit });
+  res.json({ ok: true, count: rows.length, rows });
+});
+
+adminRouter.post('/api/feedback/:id/reviewed', async (req, res) => {
+  const notes = req.body?.notes ?? req.query.notes ?? null;
+  const result = await markFeedbackReviewed(req.params.id, { notes });
+  res.json(result);
 });
 
 adminRouter.get('/api/digest', async (req, res) => {
@@ -102,7 +116,6 @@ adminRouter.post('/api/payments/:id/approve', async (req, res) => {
 });
 
 adminRouter.post('/api/payments/:id/reject', async (req, res) => {
-  // Capture phone before reject clears pending row shape
   const before = await getPaymentRequestByReference(req.params.id);
   const message = await rejectPayment({
     adminPhone: adminPhone(),
@@ -204,6 +217,7 @@ adminRouter.get('/', (req, res) => {
   <h1>ELISHA SPORTS BOT — Admin</h1>
   <p class="muted">Private dashboard. Keep the admin key secret.</p>
   <div class="card"><strong>Digest</strong><pre id="digest">Loading…</pre></div>
+  <div class="card"><strong>User feedback</strong><pre id="feedback">Loading…</pre></div>
   <div class="card"><strong>Status</strong><pre id="status">Loading…</pre></div>
   <div class="card"><strong>Pending payments</strong><div id="payments">Loading…</div></div>
   <div class="card">
@@ -226,6 +240,8 @@ async function api(path, opts = {}) {
 }
 async function loadDigest() {
   document.getElementById('digest').textContent = JSON.stringify(await api('/admin/api/digest'), null, 2);
+  const fb = document.getElementById('feedback');
+  if (fb) fb.textContent = JSON.stringify((await api('/admin/api/feedback?limit=20')).rows || [], null, 2);
 }
 async function loadStatus() {
   document.getElementById('status').textContent = JSON.stringify(await api('/admin/api/status'), null, 2);
