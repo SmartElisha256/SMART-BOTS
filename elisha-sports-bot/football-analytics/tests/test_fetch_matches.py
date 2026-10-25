@@ -77,3 +77,20 @@ def test_valid_provider_csv_is_atomically_saved_with_freshness_manifest(tmp_path
     assert manifest["dataset_type"] == "completed_historical_results"
     assert manifest["last_successful_update_utc"]
     assert manifest["sha256"]
+
+
+def test_provider_update_with_synthetic_rows_is_rejected(tmp_path, monkeypatch):
+    output = tmp_path / "provider_matches.csv"
+    output.write_text("last-good")
+    _configure(monkeypatch, output)
+    day = (pd.Timestamp.now(tz="UTC").normalize() - pd.Timedelta(days=3)).date().isoformat()
+    content = (
+        "match_date,home_team,away_team,home_goals,away_goals,source\\n"
+        f"{day},Arsenal,Chelsea,2,1,provider\\n"
+        f"{day},Spurs,United,1,0,synthetic\\n"
+    ).encode()
+    monkeypatch.setattr(fetch_matches.urllib.request, "urlopen", lambda *a, **k: FakeResponse(content))
+
+    with pytest.raises(ValueError, match="synthetic"):
+        fetch_matches.main()
+    assert output.read_text() == "last-good"
