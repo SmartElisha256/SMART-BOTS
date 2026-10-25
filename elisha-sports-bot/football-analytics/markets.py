@@ -14,6 +14,7 @@ untruncated infinite grid.
 from __future__ import annotations
 
 import math
+import warnings
 from typing import Any
 
 
@@ -22,7 +23,11 @@ def _pct(p: float) -> float:
 
 
 def _pmf(k: int, rate: float) -> float:
-    rate = max(0.0, min(float(rate), 20.0))
+    rate = float(rate)
+    if not math.isfinite(rate) or rate < 0 or rate > 20:
+        raise ValueError("Poisson expected-goal rates must be finite and between 0 and 20.")
+    if not isinstance(k, int) or k < 0:
+        raise ValueError("Goal count must be a non-negative integer.")
     return math.exp(-rate) * (rate ** k) / math.factorial(k)
 
 
@@ -34,53 +39,80 @@ def build_poisson_score_matrix(
     residual_tol: float = 1e-6,
     max_goals_cap: int = 15,
 ) -> tuple[dict[tuple[int, int], float], dict[str, Any]]:
-    """Build a normalised independent-Poisson score matrix.
+    """Build a normalised independent-Poisson score grid and disclose truncation.
 
-    Returns (matrix, meta) where matrix maps (home_goals, away_goals) -> probability
-    and meta documents grid size and estimated omitted tail mass before normalisation.
+    Expected goals above 20 are rejected rather than silently clamped. If the
+    adaptive grid reaches its cap before the requested tail tolerance is met,
+    a RuntimeWarning is emitted and the condition is returned in metadata.
     """
-    if not math.isfinite(home_xg) or not math.isfinite(away_xg):
-        raise ValueError("expected goals must be finite numbers.")
-    if home_xg < 0 or away_xg < 0:
-        raise ValueError("expected goals must be non-negative.")
+    for name, rate in (("home_xg", home_xg), ("away_xg", away_xg)):
+        if not isinstance(rate, (int, float)) or isinstance(rate, bool) or not math.isfinite(rate):
+            raise ValueError(f"{name} must be a finite number.")
+        if rate < 0 or rate > 20:
+            raise ValueError(f"{name} must be between 0 and 20.")
+    if not isinstance(max_goals_cap, int) or isinstance(max_goals_cap, bool) or not 1 <= max_goals_cap <= 30:
+        raise ValueError("max_goals_cap must be an integer between 1 and 30.")
+    if not isinstance(residual_tol, (int, float)) or isinstance(residual_tol, bool) or not math.isfinite(residual_tol) or not 0 < residual_tol < 1:
+        raise ValueError("residual_tol must be finite and strictly between 0 and 1.")
 
-    if max_goals is None:
-        max_goals = 7
-        residual = 1.0
-        while max_goals < max_goals_cap:
-            cdf_h = sum(_pmf(k, home_xg) for k in range(0, max_goals + 1))
-            cdf_a = sum(_pmf(k, away_xg) for k in range(0, max_goals + 1))
+    adaptive = max_goals is None
+    if adaptive:
+        grid_size = min(7, max_goals_cap)
+        while True:
+            cdf_h = sum(_pmf(k, home_xg) for k in range(grid_size + 1))
+            cdf_a = sum(_pmf(k, away_xg) for k in range(grid_size + 1))
             residual = max(0.0, 1.0 - cdf_h * cdf_a)
-            if residual < residual_tol:
+            if residual < residual_tol or grid_size >= max_goals_cap:
                 break
-            max_goals += 1
+            grid_size += 1
     else:
-        cdf_h = sum(_pmf(k, home_xg) for k in range(0, max_goals + 1))
-        cdf_a = sum(_pmf(k, away_xg) for k in range(0, max_goals + 1))
+        if not isinstance(max_goals, int) or isinstance(max_goals, bool) or max_goals < 0:
+            raise ValueError("max_goals must be a non-negative integer or None.")
+        if max_goals > max_goals_cap:
+            raise ValueError("max_goals cannot exceed max_goals_cap.")
+        grid_size = max_goals
+        cdf_h = sum(_pmf(k, home_xg) for k in range(grid_size + 1))
+        cdf_a = sum(_pmf(k, away_xg) for k in range(grid_size + 1))
         residual = max(0.0, 1.0 - cdf_h * cdf_a)
 
+    tolerance_met = residual < residual_tol
+    cap_reached = bool(adaptive and grid_size >= max_goals_cap and not tolerance_met)
+    if not tolerance_met:
+        message = (
+            f"Poisson score grid omitted-tail estimate {residual:.6g} exceeds tolerance "
+            f"{residual_tol:g} at grid 0–{grid_size}; displayed markets are truncated approximations."
+        )
+        warnings.warn(message, RuntimeWarning, stacklevel=2)
+
     raw: dict[tuple[int, int], float] = {}
-    for h in range(0, max_goals + 1):
-        for a in range(0, max_goals + 1):
+    for h in range(grid_size + 1):
+        for a in range(grid_size + 1):
             raw[(h, a)] = _pmf(h, home_xg) * _pmf(a, away_xg)
     total = sum(raw.values())
     if total <= 0 or not math.isfinite(total):
         raise ValueError("Score matrix has no valid probability mass.")
-    normalised = {k: v / total for k, v in raw.items()}
+    normalised = {key: value / total for key, value in raw.items()}
     meta = {
-        "max_goals_per_team": max_goals,
+        "max_goals_per_team": grid_size,
         "raw_mass_before_norm": float(total),
         "omitted_tail_mass_estimate": float(residual),
-        "residual_tol": residual_tol,
+        "residual_tol": float(residual_tol),
+        "tolerance_met": bool(tolerance_met),
+        "cap_reached": cap_reached,
+        "warning": None if tolerance_met else (
+            f"Tail tolerance not met: estimated omitted mass {residual:.6g} "
+            f"exceeds {residual_tol:g} at grid cap {grid_size}."
+            if cap_reached else
+            f"Fixed grid omitted-tail estimate {residual:.6g} exceeds tolerance {residual_tol:g}."
+        ),
         "approximation": "truncated_independent_poisson_normalised",
         "truncation_note": (
-            f"Grid 0–{max_goals} goals/side; estimated omitted joint tail mass "
-            f"{residual:.2e} before normalisation (tol {residual_tol}). "
+            f"Grid 0–{grid_size} goals/side; estimated omitted joint tail mass "
+            f"{residual:.2e} before normalisation (tol {residual_tol:g}). "
             "Displayed probabilities sum to 1 over the truncated grid only."
         ),
     }
     return normalised, meta
-
 
 def markets_from_score_matrix(
     score_matrix: dict[tuple[int, int], float],
