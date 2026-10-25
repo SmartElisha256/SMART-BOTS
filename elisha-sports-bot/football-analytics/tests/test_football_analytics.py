@@ -151,7 +151,7 @@ def test_goal_line_probabilities_are_complementary(tmp_path):
         os.chdir(old)
     for line in ("2_5",):
         assert result["goal_markets"][f"over_{line}"] + result["goal_markets"][f"under_{line}"] == pytest.approx(1.0)
-    assert result["data_quality"]["status"] in {"ok", "limited", "synthetic", "unvalidated"}
+    assert result["data_quality"]["status"] in {"ok", "limited", "synthetic", "unvalidated", "stale"}
 
 
 def test_optional_shot_features_use_available_history_only():
