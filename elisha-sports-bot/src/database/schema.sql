@@ -44,36 +44,93 @@ CREATE INDEX IF NOT EXISTS idx_daily_usage_date ON daily_usage(usage_date DESC);
 CREATE INDEX IF NOT EXISTS idx_daily_usage_phone_date ON daily_usage(phone, usage_date DESC);
 
 CREATE TABLE IF NOT EXISTS sports_cache (
-  id SERIAL PRIMARY KEY, cache_key VARCHAR(255) NOT NULL UNIQUE, data JSONB NOT NULL,
-  expires_at TIMESTAMPTZ NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
+  cache_key VARCHAR(255) PRIMARY KEY,
+  payload JSONB NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_sports_cache_key ON sports_cache(cache_key);
-CREATE INDEX IF NOT EXISTS idx_sports_cache_expires_at ON sports_cache(expires_at);
+CREATE INDEX IF NOT EXISTS idx_sports_cache_expires ON sports_cache(expires_at);
 
 CREATE TABLE IF NOT EXISTS manual_payment_requests (
-  id BIGSERIAL PRIMARY KEY, phone VARCHAR(30) NOT NULL, transaction_id VARCHAR(100) UNIQUE,
-  amount_ugx INTEGER NOT NULL CHECK (amount_ugx > 0), network VARCHAR(40) NOT NULL,
-  plan_duration_days INTEGER NOT NULL DEFAULT 7 CHECK (plan_duration_days IN (1, 7, 30)),
-  status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
-  reviewed_by VARCHAR(30), reviewed_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  id SERIAL PRIMARY KEY,
+  phone VARCHAR(30) NOT NULL,
+  transaction_id VARCHAR(120),
+  amount_ugx INTEGER,
+  plan_duration_days INTEGER,
+  status VARCHAR(30) NOT NULL DEFAULT 'pending',
+  reviewed_by VARCHAR(30),
+  reviewed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
-ALTER TABLE manual_payment_requests ADD COLUMN IF NOT EXISTS plan_duration_days INTEGER NOT NULL DEFAULT 7;
-ALTER TABLE manual_payment_requests DROP CONSTRAINT IF EXISTS manual_payment_requests_check;
-ALTER TABLE manual_payment_requests DROP COLUMN IF EXISTS screenshot_media_id;
-CREATE INDEX IF NOT EXISTS idx_manual_payment_requests_phone ON manual_payment_requests(phone);
-CREATE INDEX IF NOT EXISTS idx_manual_payment_requests_status ON manual_payment_requests(status, created_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_manual_payment_transaction_unique ON manual_payment_requests(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_manual_payments_status ON manual_payment_requests(status);
+CREATE INDEX IF NOT EXISTS idx_manual_payments_phone ON manual_payment_requests(phone);
+CREATE INDEX IF NOT EXISTS idx_manual_payments_created ON manual_payment_requests(created_at DESC);
 
--- Audit trail for admin payment decisions (APPROVE / REJECT / SETPLAN).
 CREATE TABLE IF NOT EXISTS payment_audit_log (
   id BIGSERIAL PRIMARY KEY,
-  payment_id BIGINT NOT NULL,
+  payment_id INTEGER,
   action VARCHAR(40) NOT NULL,
-  previous_status VARCHAR(20),
-  new_status VARCHAR(20),
-  admin_phone VARCHAR(30) NOT NULL,
+  previous_status VARCHAR(30),
+  new_status VARCHAR(30),
+  admin_phone VARCHAR(30),
   details TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_payment_audit_created ON payment_audit_log(created_at DESC);
+
+-- Growth / feedback tables (also in migrations/*.sql for existing installs)
+CREATE TABLE IF NOT EXISTS prediction_logs (
+  id BIGSERIAL PRIMARY KEY,
+  phone VARCHAR(30),
+  home_team VARCHAR(120) NOT NULL,
+  away_team VARCHAR(120) NOT NULL,
+  kickoff TIMESTAMPTZ,
+  predicted_1x2 VARCHAR(10),
+  home_win_prob NUMERIC(6,4),
+  draw_prob NUMERIC(6,4),
+  away_win_prob NUMERIC(6,4),
+  confidence_level VARCHAR(20),
+  historical_matches INTEGER,
+  data_quality_status VARCHAR(30),
+  model_version VARCHAR(80),
+  source_command VARCHAR(40),
+  actual_1x2 VARCHAR(10),
+  actual_home_goals INTEGER,
+  actual_away_goals INTEGER,
+  resolved_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_payment_audit_payment_id ON payment_audit_log(payment_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_payment_audit_admin ON payment_audit_log(admin_phone, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_prediction_logs_created ON prediction_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_prediction_logs_unresolved ON prediction_logs(resolved_at) WHERE resolved_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_prediction_logs_phone ON prediction_logs(phone);
+
+CREATE TABLE IF NOT EXISTS conversion_prompts (
+  phone VARCHAR(30) PRIMARY KEY,
+  free_replies INTEGER NOT NULL DEFAULT 0,
+  last_prompt_at TIMESTAMPTZ,
+  converted_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS expiry_reminders (
+  phone VARCHAR(30) NOT NULL,
+  subscription_id INTEGER,
+  expires_at TIMESTAMPTZ NOT NULL,
+  sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (phone, expires_at)
+);
+
+CREATE TABLE IF NOT EXISTS user_feedback (
+  id BIGSERIAL PRIMARY KEY,
+  phone VARCHAR(30) NOT NULL,
+  category VARCHAR(40) NOT NULL DEFAULT 'general',
+  message TEXT NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'new',
+  admin_notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  reviewed_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_user_feedback_created ON user_feedback(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_user_feedback_status ON user_feedback(status);
+CREATE INDEX IF NOT EXISTS idx_user_feedback_phone ON user_feedback(phone);
