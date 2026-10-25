@@ -19,6 +19,7 @@ import {
 import { runAnalyzeCommand, runTipCommand } from '../commands/analyzeCommand.js';
 import { addAnalysisJob, isQueueAvailable } from '../jobs/queue.js';
 import { maybeAppendUpgradePrompt } from './conversionService.js';
+import { submitFeedback } from './feedbackService.js';
 
 const commandRequestSchema = z.object({
   sender: z.string().min(5),
@@ -206,6 +207,11 @@ export async function processIncomingMessage(input) {
           reply = 'Notifications disabled. You will not receive match alerts.';
           break;
 
+        case 'feedback':
+        case 'review':
+          reply = await submitFeedback({ phone: sender, text: args || '' });
+          break;
+
         default:
           logger.warn({ phone: sender, command }, 'Unknown command');
           reply = `Unknown command: "${raw}". Reply with MENU or HELP.`;
@@ -213,7 +219,7 @@ export async function processIncomingMessage(input) {
     }
 
     // Soft conversion prompt for free users after several useful replies
-    if (command && !['upgrade', 'menu', 'help'].includes(command)) {
+    if (command && !['upgrade', 'menu', 'help', 'feedback', 'review'].includes(command)) {
       reply = await maybeAppendUpgradePrompt(sender, reply);
     }
 
