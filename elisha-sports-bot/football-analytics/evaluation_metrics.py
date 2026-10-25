@@ -57,7 +57,9 @@ def assert_strictly_chronological(train_dates, test_dates) -> None:
     test = pd.to_datetime(test_dates, utc=True)
     if len(train) == 0 or len(test) == 0:
         raise ValueError("Chronological train and test sets must both be non-empty.")
-    if train.max() >= test.min():
+    # Football results datasets often store kickoff as a date with no time. Treat
+    # the full UTC calendar day as indivisible so no same-day match can cross folds.
+    if train.max().normalize() >= test.min().normalize():
         raise ValueError("Chronological leakage detected: training dates must be strictly earlier than test dates.")
 
 
