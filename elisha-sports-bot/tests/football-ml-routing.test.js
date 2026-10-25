@@ -28,7 +28,7 @@ test('ML prediction formatter safely renders supported output', () => {
     data_quality: { historical_matches: 500, warnings: [] }
   });
   assert.match(text, /Arsenal vs Chelsea/);
-  assert.match(text, /Home 50.0%/);
-  assert.match(text, /BTTS: Yes 60.0%/);
-  assert.match(text, /not guarantees/);
+  assert.match(text, /Home win: 50\.0%/);
+  assert.match(text, /BTTS Yes: 60\.0%/);
+  assert.match(text, /not betting advice|not guarantees/);
 });
