@@ -20,7 +20,7 @@ from features import load_matches
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default=os.getenv("FOOTBALL_RESULTS_CSV_URL"))
-    parser.add_argument("--output", default="data/matches.csv")
+    parser.add_argument("--output", default="data/provider_matches.csv")
     parser.add_argument("--max-age-days", type=int, default=90)
     args = parser.parse_args()
 
