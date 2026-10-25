@@ -85,9 +85,9 @@ def test_provider_update_with_synthetic_rows_is_rejected(tmp_path, monkeypatch):
     _configure(monkeypatch, output)
     day = (pd.Timestamp.now(tz="UTC").normalize() - pd.Timedelta(days=3)).date().isoformat()
     content = (
-        "match_date,home_team,away_team,home_goals,away_goals,source\\n"
-        f"{day},Arsenal,Chelsea,2,1,provider\\n"
-        f"{day},Spurs,United,1,0,synthetic\\n"
+        "match_date,home_team,away_team,home_goals,away_goals,source\n"
+        f"{day},Arsenal,Chelsea,2,1,provider\n"
+        f"{day},Spurs,United,1,0,synthetic\n"
     ).encode()
     monkeypatch.setattr(fetch_matches.urllib.request, "urlopen", lambda *a, **k: FakeResponse(content))
 
