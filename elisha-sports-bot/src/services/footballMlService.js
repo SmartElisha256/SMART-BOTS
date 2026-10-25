@@ -134,7 +134,7 @@ export function formatMlPrediction(prediction) {
       warnings.length ? `Data-quality warnings: ${warnings.join(' | ')}` : null,
       '',
       'Verify team names and the availability of completed historical results before retrying.'
-    ].filter(Boolean).join('\\n');
+    ].filter(Boolean).join('\n');
   }
   const pct = (value) => {
     const n = Number(value);
