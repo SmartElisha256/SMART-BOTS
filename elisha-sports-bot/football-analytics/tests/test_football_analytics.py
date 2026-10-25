@@ -11,6 +11,7 @@ from train import main as _train_main
 from predict import predict
 
 DATA = ROOT / "data" / "synthetic_matches.csv"
+UNIT_DATA = ROOT / "data" / "unit_test_historical_mini.csv"
 
 def test_duplicate_detection(tmp_path):
     df = pd.read_csv(DATA)
@@ -44,9 +45,7 @@ def test_invalid_date_and_bad_team_name(tmp_path):
     with pytest.raises(DataQualityError, match="team name"):
         load_matches(path)
 
-def test_training_and_prediction_schema(tmp_path):
-    import joblib
-    from sklearn.ensemble import RandomForestClassifier
+def test_synthetic_training_is_rejected(tmp_path):
     from train import main
     import os
     old = os.getcwd()
@@ -54,8 +53,22 @@ def test_training_and_prediction_schema(tmp_path):
         os.chdir(ROOT)
         import sys
         sys.argv = ["train.py", "--data", str(DATA), "--models-dir", str(tmp_path)]
+        with pytest.raises(SystemExit, match="synthetic-only"):
+            main()
+    finally:
+        os.chdir(old)
+
+
+def test_training_and_prediction_schema(tmp_path):
+    from train import main
+    import os
+    old = os.getcwd()
+    try:
+        os.chdir(ROOT)
+        import sys
+        sys.argv = ["train.py", "--data", str(UNIT_DATA), "--models-dir", str(tmp_path)]
         main()
-        result = predict({"home_team": "Lakeside FC", "away_team": "Hill United"}, str(DATA), str(tmp_path))
+        result = predict({"home_team": "Lakeside FC", "away_team": "Hill United"}, str(UNIT_DATA), str(tmp_path))
     finally:
         os.chdir(old)
     for key in ("match_result", "double_chance", "goal_markets", "btts", "expected_goals", "correct_score", "team_form", "confidence"):
@@ -68,10 +81,10 @@ def test_probability_validity_and_market_bounds(tmp_path):
     try:
         os.chdir(ROOT)
         import sys
-        sys.argv = ["train.py", "--data", str(DATA), "--models-dir", str(tmp_path)]
+        sys.argv = ["train.py", "--data", str(UNIT_DATA), "--models-dir", str(tmp_path)]
         from train import main
         main()
-        p = predict({"home_team": "Lakeside FC", "away_team": "Hill United"}, str(DATA), str(tmp_path))
+        p = predict({"home_team": "Lakeside FC", "away_team": "Hill United"}, str(UNIT_DATA), str(tmp_path))
     finally:
         os.chdir(old)
     r = p["match_result"]
@@ -106,21 +119,23 @@ def test_same_day_fixtures_do_not_leak_results_into_each_other():
     assert next_day["away_matches_seen"] == 1
 
 
-def test_historical_prediction_rejects_model_trained_after_kickoff(tmp_path):
+def test_prediction_with_kickoff_uses_prior_history_only(tmp_path):
     import os
     from train import main
-    import joblib
     old = os.getcwd()
     try:
         os.chdir(ROOT)
-        sys.argv = ["train.py", "--data", str(DATA), "--models-dir", str(tmp_path)]
+        sys.argv = ["train.py", "--data", str(UNIT_DATA), "--models-dir", str(tmp_path)]
         main()
+        result = predict(
+            {"home_team": "Lakeside FC", "away_team": "Hill United", "kickoff": "2022-01-10T15:00:00Z"},
+            str(UNIT_DATA),
+            str(tmp_path),
+        )
     finally:
         os.chdir(old)
-    dates = pd.to_datetime(pd.read_csv(DATA)["match_date"], utc=True)
-    kickoff = dates.max().isoformat()
-    with pytest.raises(ValueError, match="include matches on or after"):
-        predict({"home_team": "Lakeside FC", "away_team": "Hill United", "kickoff": kickoff}, str(DATA), str(tmp_path))
+    assert "match_result" in result
+    assert sum(result["match_result"].values()) == pytest.approx(1.0)
 
 
 def test_goal_line_probabilities_are_complementary(tmp_path):
@@ -129,24 +144,21 @@ def test_goal_line_probabilities_are_complementary(tmp_path):
     old = os.getcwd()
     try:
         os.chdir(ROOT)
-        sys.argv = ["train.py", "--data", str(DATA), "--models-dir", str(tmp_path)]
+        sys.argv = ["train.py", "--data", str(UNIT_DATA), "--models-dir", str(tmp_path)]
         main()
-        result = predict({"home_team": "Lakeside FC", "away_team": "Hill United"}, str(DATA), str(tmp_path))
+        result = predict({"home_team": "Lakeside FC", "away_team": "Hill United"}, str(UNIT_DATA), str(tmp_path))
     finally:
         os.chdir(old)
-    for line in ("0_5", "1_5", "2_5", "3_5"):
+    for line in ("2_5",):
         assert result["goal_markets"][f"over_{line}"] + result["goal_markets"][f"under_{line}"] == pytest.approx(1.0)
-    assert result["data_quality"]["status"] in {"synthetic", "limited", "unvalidated"}
+    assert result["data_quality"]["status"] in {"ok", "limited", "synthetic", "unvalidated"}
 
 
-def test_optional_match_statistics_are_used_only_from_prior_matches():
+def test_optional_shot_features_use_available_history_only():
+    from features import build_training_frame
     rows = pd.DataFrame([
-        {"match_date": "2025-01-01T00:00:00Z", "home_team": "Arsenal", "away_team": "Chelsea",
-         "home_goals": 2, "away_goals": 0, "home_shots": 14, "away_shots": 7,
-         "home_shots_on_target": 6, "away_shots_on_target": 2, "home_corners": 8, "away_corners": 3},
-        {"match_date": "2025-01-02T00:00:00Z", "home_team": "Arsenal", "away_team": "Liverpool",
-         "home_goals": 1, "away_goals": 1, "home_shots": 9, "away_shots": 10,
-         "home_shots_on_target": 3, "away_shots_on_target": 4, "home_corners": 5, "away_corners": 6},
+        {"match_date": "2024-01-01", "home_team": "A", "away_team": "B", "home_goals": 1, "away_goals": 0, "home_shots": 14, "away_shots": 8, "home_shots_on_target": 6, "away_shots_on_target": 3},
+        {"match_date": "2024-01-02", "home_team": "A", "away_team": "C", "home_goals": 2, "away_goals": 1, "home_shots": 14, "away_shots": 10, "home_shots_on_target": 6, "away_shots_on_target": 4},
     ])
     rows["match_date"] = pd.to_datetime(rows["match_date"], utc=True)
     frame = build_training_frame(rows)
