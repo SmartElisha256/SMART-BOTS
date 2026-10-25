@@ -26,9 +26,10 @@ def main():
     proposed_split = max(40, int(len(frame) * 0.8))
     if proposed_split >= len(frame):
         proposed_split = len(frame) - 1
-    cutoff = frame.iloc[proposed_split]["match_date"]
-    train = frame[frame["match_date"] < cutoff].copy()
-    test = frame[frame["match_date"] >= cutoff].copy()
+    cutoff_date = frame.iloc[proposed_split]["match_date"].normalize()
+    match_days = frame["match_date"].dt.normalize()
+    train = frame[match_days < cutoff_date].copy()
+    test = frame[match_days >= cutoff_date].copy()
     if len(train) < 40 or len(test) < 1:
         raise ValueError("Insufficient data after enforcing a strict date-based holdout.")
     assert_strictly_chronological(train["match_date"], test["match_date"])
