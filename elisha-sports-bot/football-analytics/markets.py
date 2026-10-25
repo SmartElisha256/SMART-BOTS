@@ -2,14 +2,84 @@
 
 All markets here share the same score distribution so probabilities stay consistent.
 Classifier-based 1X2 estimates must NOT be mixed into these calculations.
+
+Truncation policy
+-----------------
+The score grid is expanded until the estimated omitted joint Poisson tail mass is
+below a documented tolerance (default 1e-6), capped at 15 goals per side. The matrix
+is then normalised so represented cells sum to 1. Probabilities are therefore exact
+within the truncated-and-normalised independent-Poisson model, not exact for the
+untruncated infinite grid.
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
 def _pct(p: float) -> float:
     return round(100.0 * float(p), 2)
+
+
+def _pmf(k: int, rate: float) -> float:
+    rate = max(0.0, min(float(rate), 20.0))
+    return math.exp(-rate) * (rate ** k) / math.factorial(k)
+
+
+def build_poisson_score_matrix(
+    home_xg: float,
+    away_xg: float,
+    *,
+    max_goals: int | None = None,
+    residual_tol: float = 1e-6,
+    max_goals_cap: int = 15,
+) -> tuple[dict[tuple[int, int], float], dict[str, Any]]:
+    """Build a normalised independent-Poisson score matrix.
+
+    Returns (matrix, meta) where matrix maps (home_goals, away_goals) -> probability
+    and meta documents grid size and estimated omitted tail mass before normalisation.
+    """
+    if not math.isfinite(home_xg) or not math.isfinite(away_xg):
+        raise ValueError("expected goals must be finite numbers.")
+    if home_xg < 0 or away_xg < 0:
+        raise ValueError("expected goals must be non-negative.")
+
+    if max_goals is None:
+        max_goals = 7
+        residual = 1.0
+        while max_goals < max_goals_cap:
+            cdf_h = sum(_pmf(k, home_xg) for k in range(0, max_goals + 1))
+            cdf_a = sum(_pmf(k, away_xg) for k in range(0, max_goals + 1))
+            residual = max(0.0, 1.0 - cdf_h * cdf_a)
+            if residual < residual_tol:
+                break
+            max_goals += 1
+    else:
+        cdf_h = sum(_pmf(k, home_xg) for k in range(0, max_goals + 1))
+        cdf_a = sum(_pmf(k, away_xg) for k in range(0, max_goals + 1))
+        residual = max(0.0, 1.0 - cdf_h * cdf_a)
+
+    raw: dict[tuple[int, int], float] = {}
+    for h in range(0, max_goals + 1):
+        for a in range(0, max_goals + 1):
+            raw[(h, a)] = _pmf(h, home_xg) * _pmf(a, away_xg)
+    total = sum(raw.values())
+    if total <= 0 or not math.isfinite(total):
+        raise ValueError("Score matrix has no valid probability mass.")
+    normalised = {k: v / total for k, v in raw.items()}
+    meta = {
+        "max_goals_per_team": max_goals,
+        "raw_mass_before_norm": float(total),
+        "omitted_tail_mass_estimate": float(residual),
+        "residual_tol": residual_tol,
+        "approximation": "truncated_independent_poisson_normalised",
+        "truncation_note": (
+            f"Grid 0–{max_goals} goals/side; estimated omitted joint tail mass "
+            f"{residual:.2e} before normalisation (tol {residual_tol}). "
+            "Displayed probabilities sum to 1 over the truncated grid only."
+        ),
+    }
+    return normalised, meta
 
 
 def markets_from_score_matrix(
@@ -18,16 +88,14 @@ def markets_from_score_matrix(
     away_xg: float,
     *,
     max_goals: int = 7,
+    grid_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build market estimates from a normalised score matrix {(h, a): p}."""
     total_mass = sum(score_matrix.values())
     if total_mass <= 0:
         raise ValueError("Score matrix has no probability mass.")
-
-    truncation_note = (
-        f"Score grid 0–{max_goals} goals per team; residual mass beyond the grid is "
-        "folded into the normalised matrix (approximation)."
-    )
+    if abs(total_mass - 1.0) > 1e-6:
+        score_matrix = {k: v / total_mass for k, v in score_matrix.items()}
 
     home_win = draw = away_win = 0.0
     btts_yes = 0.0
@@ -40,6 +108,8 @@ def markets_from_score_matrix(
     goal_ranges = {"0_1": 0.0, "2_3": 0.0, "4_plus": 0.0}
 
     for (h, a), p in score_matrix.items():
+        if p < 0 or not math.isfinite(p):
+            raise ValueError("Score matrix contains invalid probabilities.")
         if h > a:
             home_win += p
         elif h == a:
@@ -77,15 +147,10 @@ def markets_from_score_matrix(
         else:
             goal_ranges["4_plus"] += p
 
-    result = {
-        "home_win": home_win,
-        "draw": draw,
-        "away_win": away_win,
-    }
+    result = {"home_win": home_win, "draw": draw, "away_win": away_win}
     dnb_den = home_win + away_win
     if dnb_den > 0:
-        dnb_home = home_win / dnb_den
-        dnb_away = away_win / dnb_den
+        dnb_home, dnb_away = home_win / dnb_den, away_win / dnb_den
     else:
         dnb_home = dnb_away = 0.5
 
@@ -111,6 +176,23 @@ def markets_from_score_matrix(
         key=lambda item: item["probability"],
         reverse=True,
     )
+    top_note = (
+        "The top correct-score rank is the mode of the truncated Poisson grid; "
+        "its probability is usually far below 50% and is not a high-certainty pick."
+    )
+
+    meta = {
+        "source": "independent_poisson_score_matrix",
+        "max_goals_per_team": max_goals,
+        "matrix_cells": len(score_matrix),
+        "truncation_note": (
+            f"Score grid 0–{max_goals} goals per team; residual mass beyond the grid "
+            "is estimated before normalisation (see omitted_tail_mass_estimate)."
+        ),
+        "top_score_note": top_note,
+    }
+    if grid_meta:
+        meta.update(grid_meta)
 
     return {
         "match_result": result,
@@ -145,6 +227,7 @@ def markets_from_score_matrix(
             "total": float(home_xg + away_xg),
         },
         "correct_score": scores[:8],
+        "correct_score_note": top_note,
         "half_time": {
             "available": False,
             "reason": "No first-half score model or HT historical labels are trained in this pipeline.",
@@ -153,12 +236,7 @@ def markets_from_score_matrix(
             "available": False,
             "reason": "Requires a temporal scoring model; not derived from full-time Poisson scores alone.",
         },
-        "meta": {
-            "source": "independent_poisson_score_matrix",
-            "max_goals_per_team": max_goals,
-            "truncation_note": truncation_note,
-            "matrix_cells": len(score_matrix),
-        },
+        "meta": meta,
     }
 
 
