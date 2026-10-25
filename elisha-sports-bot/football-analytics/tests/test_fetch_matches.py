@@ -77,6 +77,7 @@ def test_valid_provider_csv_is_atomically_saved_with_freshness_manifest(tmp_path
     assert manifest["dataset_type"] == "completed_historical_results"
     assert manifest["last_successful_update_utc"]
     assert manifest["sha256"]
+    assert manifest["seasons_covered"]
 
 
 def test_provider_update_with_synthetic_rows_is_rejected(tmp_path, monkeypatch):
