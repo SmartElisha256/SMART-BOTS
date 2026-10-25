@@ -15,10 +15,9 @@ try {
   console.log(`Configured: ${status.configured ? 'YES' : 'NO'}`);
   console.log(`Endpoint: ${status.endpoint || 'N/A'}`);
 
-  if (env.MESSAGING_PROVIDER === 'callmebot') {
-    console.log(`API Key Set: ${status.apiKeySet ? 'YES' : 'NO'}`);
-    console.log(`Phone Set: ${status.phoneSet ? 'YES' : 'NO'}`);
-    console.log(`Timeout: ${status.timeout}ms`);
+  if (env.MESSAGING_PROVIDER === 'whatsapp-cloud') {
+    console.log(`Access token set: ${status.tokenSet ? 'YES' : 'NO'}`);
+    console.log(`Phone number ID set: ${status.phoneNumberIdSet ? 'YES' : 'NO'}`);
   }
 
   console.log(`\nAvailable providers: ${getAvailableProviders().join(', ')}`);
@@ -30,7 +29,8 @@ try {
   console.error(error.message);
   console.error('\nSetup instructions:\n');
   console.error('1. Copy .env.example to .env');
-  console.error('2. Update MESSAGING_PROVIDER and provider-specific settings');
-  console.error('3. Run this script again to validate\n');
+  console.error('2. Set MESSAGING_PROVIDER to mock or whatsapp-cloud');
+  console.error('3. For production, set WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID');
+  console.error('4. Run this script again to validate\n');
   process.exit(1);
 }
