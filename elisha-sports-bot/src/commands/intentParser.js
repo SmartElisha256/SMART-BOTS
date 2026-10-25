@@ -86,11 +86,21 @@ export function interpretNaturalLanguage(input) {
   if (/\b(upgrade|premium plans?|pricing|subscribe|subscription)\b/.test(text)) {
     return { command: 'upgrade', args: null, raw: text };
   }
+  if (/^(feedback|review|suggestion|report)\b/.test(text) || /\b(send feedback|leave a review|product feedback)\b/.test(text)) {
+    const args = text
+      .replace(/^(feedback|review|suggestion|report)\s*/i, '')
+      .replace(/^(send feedback|leave a review|product feedback)\s*/i, '')
+      .trim();
+    return { command: 'feedback', args: args || null, raw: text };
+  }
 
   const explicitCommand = text.match(COMMAND_REGEX);
-  if (explicitCommand && /^(menu|help|fixtures|live|table|form|h2h|analyze|analysis|season|historical|tip|tips|start|stop|leagues|league|team|myteam)$/.test(explicitCommand[1])) {
+  if (explicitCommand && /^(menu|help|fixtures|live|table|form|h2h|analyze|analysis|season|historical|tip|tips|start|stop|leagues|league|team|myteam|feedback|review|suggestion|report)$/.test(explicitCommand[1])) {
     if (!(explicitCommand[1] === 'form' && /^form of\s+/.test(text))) {
-      return { command: explicitCommand[1] === 'myteam' ? 'team' : explicitCommand[1], args: explicitCommand[2] ? explicitCommand[2].trim() : null, raw: text };
+      let cmd = explicitCommand[1];
+      if (cmd === 'myteam') cmd = 'team';
+      if (cmd === 'review' || cmd === 'suggestion' || cmd === 'report') cmd = 'feedback';
+      return { command: cmd, args: explicitCommand[2] ? explicitCommand[2].trim() : null, raw: text };
     }
   }
 
