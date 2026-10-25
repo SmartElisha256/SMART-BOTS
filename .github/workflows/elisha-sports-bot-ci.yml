@@ -45,8 +45,22 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Set up Python for cross-runtime prediction integration
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: elisha-sports-bot/football-analytics/requirements.txt
+      - name: Install Python analytics dependencies
+        run: python -m pip install -r football-analytics/requirements.txt
+      - name: Prepare and train real EPL prediction artifacts
+        run: |
+          python football-analytics/prepare_epl_data.py
+          python football-analytics/train.py --data football-analytics/data/epl_historical.csv --models-dir football-analytics/models
       - name: Install dependencies
         run: npm install
+      - name: Run Node-to-Python prediction integration
+        run: node --test --test-timeout=30000 tests/football-ml-integration.ci.js
       - name: Run football ML route tests
         run: node --test --test-timeout=15000 tests/football-ml.test.js
       - name: Run unit tests
