@@ -123,9 +123,22 @@ def markets_from_score_matrix(
     grid_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build market estimates from a normalised score matrix {(h, a): p}."""
+    for name, rate in (("home_xg", home_xg), ("away_xg", away_xg)):
+        if not isinstance(rate, (int, float)) or isinstance(rate, bool) or not math.isfinite(rate) or rate < 0 or rate > 20:
+            raise ValueError(f"{name} must be finite and between 0 and 20.")
+    if not isinstance(score_matrix, dict) or not score_matrix:
+        raise ValueError("Score matrix must be a non-empty dictionary.")
+    for key, probability in score_matrix.items():
+        if (
+            not isinstance(key, tuple) or len(key) != 2
+            or any(not isinstance(goal, int) or isinstance(goal, bool) or goal < 0 for goal in key)
+        ):
+            raise ValueError("Score matrix keys must be (non-negative home goals, non-negative away goals) integers.")
+        if not isinstance(probability, (int, float)) or isinstance(probability, bool) or not math.isfinite(probability) or probability < 0 or probability > 1:
+            raise ValueError("Score matrix probabilities must be finite values between 0 and 1.")
     total_mass = sum(score_matrix.values())
-    if total_mass <= 0:
-        raise ValueError("Score matrix has no probability mass.")
+    if not math.isfinite(total_mass) or total_mass <= 0:
+        raise ValueError("Score matrix has no valid probability mass.")
     if abs(total_mass - 1.0) > 1e-6:
         score_matrix = {k: v / total_mass for k, v in score_matrix.items()}
 
