@@ -78,6 +78,11 @@ def main():
         # Atomic replace only after all validation succeeds. Existing output remains untouched on failure.
         os.replace(temp_name, output)
         temp_name = None
+        seasons_covered = sorted({
+            f"{match_date.year}-{match_date.year + 1}" if match_date.month >= 8
+            else f"{match_date.year - 1}-{match_date.year}"
+            for match_date in df["match_date"]
+        })
         manifest = {
             "provider_host": parsed.hostname,
             "provider_url_credentials_or_query_saved": False,
@@ -85,6 +90,7 @@ def main():
             "dataset_type": "completed_historical_results",
             "rows": int(len(df)),
             "date_range": {"from": str(df["match_date"].min().date()), "to": str(newest.date())},
+            "seasons_covered": seasons_covered,
             "data_age_days_at_update": age_days,
             "freshness_status": "recent_completed_results",
             "sha256": hashlib.sha256(content).hexdigest(),
