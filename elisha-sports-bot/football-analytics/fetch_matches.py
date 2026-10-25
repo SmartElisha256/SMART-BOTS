@@ -62,8 +62,8 @@ def main():
         df = load_matches(temp_name)
         if df.empty:
             raise ValueError("Provider CSV contains no completed matches.")
-        if "source" in df.columns and (df["source"].astype(str).str.lower() == "synthetic").all():
-            raise ValueError("Synthetic test data cannot be used as a provider update.")
+        if "source" in df.columns and df["source"].astype(str).str.lower().eq("synthetic").any():
+            raise ValueError("Provider updates containing any synthetic test rows are rejected.")
         now = pd.Timestamp.now(tz="UTC")
         if (df["match_date"] > now + pd.Timedelta(days=1)).any():
             raise ValueError("CSV contains future-dated rows; this workflow accepts completed results only.")
