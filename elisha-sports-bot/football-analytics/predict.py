@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from features import FEATURES, features_for_fixture, load_matches, team_form
+from markets import markets_from_score_matrix, market_rows_for_display
 
 
 def poisson_pmf(k: int, rate: float) -> float:
@@ -73,7 +74,6 @@ def predict(payload: dict, data_path="data/epl_historical.csv", models_dir="mode
     feat = features_for_fixture(raw, home, away, kickoff=kickoff)
     X = pd.DataFrame([{name: float(feat.get(name, 0.0)) for name in feature_names}])[feature_names]
 
-    # Classifier 1X2 (reported separately — not mixed into score-derived markets).
     proba = classifier.predict_proba(X)[0]
     classes = list(encoder.classes_)
     class_probs = {cls: float(p) for cls, p in zip(classes, proba)}
@@ -86,41 +86,21 @@ def predict(payload: dict, data_path="data/epl_historical.csv", models_dir="mode
         ("home_win", "draw", "away_win"), key=lambda k: ml_result[k]
     )
 
-    # Expected goals from dedicated regressors → independent Poisson score model.
     home_xg = float(max(0.05, min(5.0, home_model.predict(X)[0])))
     away_xg = float(max(0.05, min(5.0, away_model.predict(X)[0])))
 
     score_matrix = {}
-    for hg in range(0, 8):
-        for ag in range(0, 8):
+    max_goals = 7
+    for hg in range(0, max_goals + 1):
+        for ag in range(0, max_goals + 1):
             score_matrix[(hg, ag)] = poisson_pmf(hg, home_xg) * poisson_pmf(ag, away_xg)
     total_p = sum(score_matrix.values()) or 1.0
     score_matrix = {k: v / total_p for k, v in score_matrix.items()}
 
-    # Primary match_result markets are derived from the same Poisson score model as
-    # correct-score / BTTS / totals so they stay internally consistent.
-    poisson_1x2 = {"home_win": 0.0, "draw": 0.0, "away_win": 0.0}
-    for (hg, ag), p in score_matrix.items():
-        if hg > ag:
-            poisson_1x2["home_win"] += p
-        elif hg == ag:
-            poisson_1x2["draw"] += p
-        else:
-            poisson_1x2["away_win"] += p
-    result_probs = _normalise(poisson_1x2)
-
-    scores = sorted(
-        [{"home": h, "away": a, "probability": float(p)} for (h, a), p in score_matrix.items()],
-        key=lambda item: item["probability"],
-        reverse=True,
-    )
-    over25 = sum(p for (h, a), p in score_matrix.items() if h + a > 2)
-    under25 = 1.0 - over25
-    btts_yes = sum(p for (h, a), p in score_matrix.items() if h > 0 and a > 0)
-    goal_lines = {
-        "over_2_5": float(over25),
-        "under_2_5": float(under25),
-    }
+    markets = markets_from_score_matrix(score_matrix, home_xg, away_xg, max_goals=max_goals)
+    result_probs = markets["match_result"]
+    scores = markets["correct_score"]
+    goal_lines = markets["goal_markets"]
 
     is_synthetic = bool(result_artifact.get("synthetic_data"))
     warnings = []
@@ -160,15 +140,20 @@ def predict(payload: dict, data_path="data/epl_historical.csv", models_dir="mode
         },
         "match_result": result_probs,
         "machine_learning_result": ml_result,
-        "double_chance": {
-            "1X": result_probs["home_win"] + result_probs["draw"],
-            "X2": result_probs["draw"] + result_probs["away_win"],
-            "12": result_probs["home_win"] + result_probs["away_win"],
-        },
+        "double_chance": markets["double_chance"],
+        "draw_no_bet": markets["draw_no_bet"],
         "goal_markets": goal_lines,
-        "btts": {"yes": float(btts_yes), "no": float(1.0 - btts_yes)},
-        "expected_goals": {"home": home_xg, "away": away_xg},
-        "correct_score": scores[:5],
+        "home_team_goals": markets["home_team_goals"],
+        "away_team_goals": markets["away_team_goals"],
+        "goal_ranges": markets["goal_ranges"],
+        "btts": markets["btts"],
+        "team_scoring": markets["team_scoring"],
+        "expected_goals": markets["expected_goals"],
+        "correct_score": scores[:8],
+        "half_time": markets["half_time"],
+        "first_team_to_score": markets["first_team_to_score"],
+        "market_rows": market_rows_for_display(markets),
+        "markets_meta": markets["meta"],
         "team_form": {
             "home": team_form(raw, home, as_of=kickoff),
             "away": team_form(raw, away, as_of=kickoff),
