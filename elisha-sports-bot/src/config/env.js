@@ -67,6 +67,12 @@ export function validateEnvironment() {
 
   const productionIssues = [];
   if (env.NODE_ENV === 'production') {
+    if (env.MESSAGING_PROVIDER === 'mock') {
+      productionIssues.push('MESSAGING_PROVIDER (mock is not allowed in production; use whatsapp-cloud)');
+    }
+    if (env.SPORTS_DATA_PROVIDER === 'mock') {
+      productionIssues.push('SPORTS_DATA_PROVIDER (mock is not allowed in production; use api-football)');
+    }
     if (env.MESSAGING_PROVIDER === 'whatsapp-cloud') {
       if (isPlaceholder(env.WHATSAPP_TOKEN)) productionIssues.push('WHATSAPP_TOKEN');
       if (isPlaceholder(env.WHATSAPP_PHONE_NUMBER_ID)) productionIssues.push('WHATSAPP_PHONE_NUMBER_ID');
