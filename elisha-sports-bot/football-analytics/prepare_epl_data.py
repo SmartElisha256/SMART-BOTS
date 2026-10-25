@@ -47,6 +47,8 @@ def main():
         provider = load_matches(provider_path)
         if provider.empty:
             raise ValueError("Configured provider file contains no completed matches.")
+        if "source" in provider.columns and provider["source"].astype(str).str.lower().eq("synthetic").any():
+            raise ValueError("Provider dataset contains synthetic rows; refusing to mix them with real EPL history.")
         latest_bundled = combined["match_date"].max()
         if (provider["match_date"] <= latest_bundled).any():
             raise ValueError(
