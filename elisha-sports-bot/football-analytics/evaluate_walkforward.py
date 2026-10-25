@@ -35,7 +35,8 @@ def main():
         test = frame[frame["season_key"] == season].copy()
         if test.empty:
             continue
-        train = frame[frame["match_date"] < test["match_date"].min()].copy()
+        first_test_day = test["match_date"].min().normalize()
+        train = frame[frame["match_date"].dt.normalize() < first_test_day].copy()
         if len(train) < args.min_train or len(test) < 50:
             continue
         assert_strictly_chronological(train["match_date"], test["match_date"])
