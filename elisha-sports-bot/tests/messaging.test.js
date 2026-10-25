@@ -1,88 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CallMeBotAdapter } from '../src/providers/messaging/callmebotAdapter.js';
 import { MockMessagingAdapter } from '../src/providers/messaging/mockMessagingAdapter.js';
+import { WhatsAppCloudProvider } from '../src/providers/messaging/whatsappCloudProvider.js';
+import { createMessagingAdapter, getAvailableProviders } from '../src/providers/messaging/factory.js';
 
-test('CallMeBotAdapter: throws error when API key is not configured', async () => {
-  const adapter = new CallMeBotAdapter({
-    apiKey: 'replace-me',
-    phone: '1234567890',
-    endpoint: 'https://api.callmebot.com/whatsapp.php'
-  });
+test('getAvailableProviders lists mock and whatsapp-cloud only', () => {
+  const providers = getAvailableProviders();
+  assert.deepEqual(providers, ['mock', 'whatsapp-cloud']);
+  assert.ok(!providers.includes('callmebot'));
+});
 
-  await assert.rejects(
-    () => adapter.sendMessage({ to: '+1234567890', text: 'Test' }),
-    /API key is not configured/
+test('createMessagingAdapter rejects unknown provider', () => {
+  assert.throws(
+    () => createMessagingAdapter('callmebot'),
+    /Unsupported messaging provider/
   );
 });
 
-test('CallMeBotAdapter: throws error when phone is not configured', async () => {
-  const adapter = new CallMeBotAdapter({
-    apiKey: 'valid-key',
-    phone: 'replace-me',
-    endpoint: 'https://api.callmebot.com/whatsapp.php'
-  });
-
-  await assert.rejects(
-    () => adapter.sendMessage({ to: '+1234567890', text: 'Test' }),
-    /phone is not configured/
-  );
-});
-
-test('CallMeBotAdapter: throws error when target phone is missing', async () => {
-  const adapter = new CallMeBotAdapter({
-    apiKey: 'valid-key',
-    phone: '1234567890',
-    endpoint: 'https://api.callmebot.com/whatsapp.php'
-  });
-
-  await assert.rejects(
-    () => adapter.sendMessage({ to: '', text: 'Test' }),
-    /Target phone number/
-  );
-});
-
-test('CallMeBotAdapter: throws error when message text is missing', async () => {
-  const adapter = new CallMeBotAdapter({
-    apiKey: 'valid-key',
-    phone: '1234567890',
-    endpoint: 'https://api.callmebot.com/whatsapp.php'
-  });
-
-  await assert.rejects(
-    () => adapter.sendMessage({ to: '+1234567890', text: '' }),
-    /Message text is required/
-  );
-});
-
-test('CallMeBotAdapter: validates configuration status', () => {
-  const adapter = new CallMeBotAdapter({
-    apiKey: 'valid-key',
-    phone: '1234567890',
-    endpoint: 'https://api.callmebot.com/whatsapp.php'
-  });
-
-  const status = adapter.getConfigStatus();
-
-  assert.equal(status.configured, true);
-  assert.equal(status.apiKeySet, true);
-  assert.equal(status.phoneSet, true);
-  assert.equal(status.endpoint, 'https://api.callmebot.com/whatsapp.php');
-  assert.equal(status.timeout, 10_000);
-});
-
-test('CallMeBotAdapter: unconfigured adapter reports not configured', () => {
-  const adapter = new CallMeBotAdapter({
-    apiKey: 'replace-me',
-    phone: 'replace-me',
-    endpoint: 'https://api.callmebot.com/whatsapp.php'
-  });
-
-  const status = adapter.getConfigStatus();
-
-  assert.equal(status.configured, false);
-  assert.equal(status.apiKeySet, false);
-  assert.equal(status.phoneSet, false);
+test('createMessagingAdapter creates mock adapter', () => {
+  const adapter = createMessagingAdapter('mock');
+  assert.equal(adapter.getConfigStatus().configured, true);
 });
 
 test('MockMessagingAdapter: sends message successfully', async () => {
@@ -135,9 +72,6 @@ test('MockMessagingAdapter: throws error when message text is missing', async ()
     /Message text is required/
   );
 });
-
-
-import { WhatsAppCloudProvider } from '../src/providers/messaging/whatsappCloudProvider.js';
 
 test('WhatsAppCloudProvider can be constructed and reports missing credentials', async () => {
   const provider = new WhatsAppCloudProvider({
