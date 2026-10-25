@@ -147,3 +147,12 @@ def test_invalid_grid_configuration_rejected():
         build_poisson_score_matrix(1.2, 1.0, max_goals_cap=0)
     with pytest.raises(ValueError):
         build_poisson_score_matrix(1.2, 1.0, max_goals=9, max_goals_cap=8)
+
+
+def test_market_derivation_rejects_invalid_expected_goals_and_score_probabilities():
+    with pytest.raises(ValueError, match="home_xg"):
+        markets_from_score_matrix({(0, 0): 1.0}, float("nan"), 1.0)
+    with pytest.raises(ValueError, match="probabilities"):
+        markets_from_score_matrix({(0, 0): -0.1, (1, 0): 1.1}, 1.0, 1.0)
+    with pytest.raises(ValueError, match="keys"):
+        markets_from_score_matrix({(-1, 0): 1.0}, 1.0, 1.0)
