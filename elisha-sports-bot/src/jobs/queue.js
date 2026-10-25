@@ -3,9 +3,21 @@ import { Queue } from 'bullmq';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 
-const connection = env.REDIS_URL
-  ? new IORedis(env.REDIS_URL, { maxRetriesPerRequest: null })
-  : null;
+// Avoid open Redis handles in unit tests (CI hangs without a Redis server).
+const connection =
+  env.NODE_ENV === 'test' || !env.REDIS_URL
+    ? null
+    : new IORedis(env.REDIS_URL, {
+        maxRetriesPerRequest: null,
+        enableOfflineQueue: false,
+        lazyConnect: true,
+        retryStrategy: (times) => (times > 3 ? null : Math.min(times * 200, 1000))
+      });
+if (connection) {
+  connection.connect().catch(() => {
+    /* connection errors surface when jobs are enqueued */
+  });
+}
 
 export const sportsQueue = connection
   ? new Queue('elisha-sports-bot', { connection })
