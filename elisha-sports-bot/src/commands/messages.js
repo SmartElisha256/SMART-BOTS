@@ -20,6 +20,7 @@ Available commands:
 • SEASON [LEAGUE] [YEAR] — historical season summary (Premium)
 • LEAGUES — supported league aliases
 • HELP — usage guide
+• FEEDBACK / REVIEW — send a review or improvement idea
 • UPGRADE — Premium plans and Mobile Money steps
 • START — enable notifications
 • STOP — disable notifications`;
@@ -53,6 +54,11 @@ ANALYZE Arsenal vs Chelsea (Premium)
 
 UPGRADE
   Day / Week / Month Mobile Money plans. Admin verifies before activation.
+
+FEEDBACK or REVIEW [your message]
+  Send a bug report, feature idea, or review to the developers.
+  Example: FEEDBACK Please add more UPL coverage
+
 
 Reply MENU for all commands.`;
 }
