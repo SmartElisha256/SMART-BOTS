@@ -1,4 +1,4 @@
-"""Tests for Poisson-derived market consistency."""
+"""Tests for Poisson-derived market consistency and adaptive score grid."""
 from pathlib import Path
 import sys
 
@@ -7,7 +7,11 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from markets import markets_from_score_matrix, market_rows_for_display
+from markets import (
+    markets_from_score_matrix,
+    market_rows_for_display,
+    build_poisson_score_matrix,
+)
 from predict import poisson_pmf
 
 
@@ -22,8 +26,7 @@ def _matrix(home_xg=1.4, away_xg=1.1, max_g=7):
 
 def test_match_result_sums_to_one():
     markets = markets_from_score_matrix(_matrix(), 1.4, 1.1)
-    s = sum(markets["match_result"].values())
-    assert s == pytest.approx(1.0, abs=1e-9)
+    assert sum(markets["match_result"].values()) == pytest.approx(1.0, abs=1e-9)
 
 
 def test_double_chance_consistency():
@@ -64,3 +67,38 @@ def test_market_rows_percentages_in_bounds():
     assert len(rows) > 10
     for row in rows:
         assert 0 <= row["probability_pct"] <= 100
+
+
+def test_low_xg_grid_small_residual():
+    matrix, meta = build_poisson_score_matrix(0.8, 0.6)
+    assert meta["omitted_tail_mass_estimate"] < 1e-5
+    assert sum(matrix.values()) == pytest.approx(1.0)
+
+
+def test_extreme_xg_expands_grid_and_stays_valid():
+    matrix, meta = build_poisson_score_matrix(4.5, 3.8)
+    assert meta["max_goals_per_team"] >= 10
+    assert meta["omitted_tail_mass_estimate"] < 1e-4 or meta["max_goals_per_team"] >= 14
+    markets = markets_from_score_matrix(
+        matrix, 4.5, 3.8, max_goals=meta["max_goals_per_team"], grid_meta=meta
+    )
+    assert sum(markets["match_result"].values()) == pytest.approx(1.0, abs=1e-8)
+    for v in markets["match_result"].values():
+        assert v >= 0 and v == v
+
+
+def test_goal_ranges_partition_total():
+    markets = markets_from_score_matrix(_matrix(1.5, 1.2), 1.5, 1.2)
+    assert sum(markets["goal_ranges"].values()) == pytest.approx(1.0, abs=1e-9)
+
+
+def test_invalid_xg_rejected():
+    with pytest.raises(ValueError):
+        build_poisson_score_matrix(-1.0, 1.0)
+    with pytest.raises(ValueError):
+        build_poisson_score_matrix(float("nan"), 1.0)
+
+
+def test_top_score_note_present():
+    markets = markets_from_score_matrix(_matrix(), 1.4, 1.1)
+    assert "mode" in markets["correct_score_note"].lower() or "rank" in markets["correct_score_note"].lower()
