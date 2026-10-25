@@ -18,7 +18,7 @@ def main():
 
     raw = load_matches(args.data)
     if "source" in raw.columns and raw["source"].astype(str).str.lower().eq("synthetic").any():
-        raise SystemExit("Refusing to report real-world evaluation on synthetic-only data.")
+        raise SystemExit("Refusing to report real-world evaluation when any synthetic rows are present.")
     frame = build_training_frame(raw).sort_values("match_date", kind="stable").reset_index(drop=True)
     if len(frame) < 50:
         raise ValueError("At least 50 matches are required.")
