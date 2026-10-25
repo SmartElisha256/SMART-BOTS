@@ -17,13 +17,27 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: elisha-sports-bot
     env:
       NODE_ENV: test
-      DATABASE_URL: postgresql://postgres:change-me@localhost:5432/elisha_sports_bot
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/elisha_sports_bot
       REDIS_URL: redis://localhost:6379
+      MESSAGING_PROVIDER: mock
+      SPORTS_DATA_PROVIDER: mock
+      ADMIN_API_KEY: test-admin-key-not-for-production
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -34,8 +48,8 @@ jobs:
       - name: Install dependencies
         run: npm install
       - name: Run football ML route tests
-        run: node --test tests/football-ml.test.js
-      - name: Run tests
+        run: node --test --test-timeout=15000 tests/football-ml.test.js
+      - name: Run unit tests
         run: npm test
       - name: Validate messaging configuration
         run: npm run validate:messaging

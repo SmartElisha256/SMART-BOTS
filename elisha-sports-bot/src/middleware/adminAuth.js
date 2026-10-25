@@ -9,7 +9,8 @@ function safeEqual(a, b) {
 
 /**
  * Protects /admin routes. Requires ADMIN_API_KEY in the environment.
- * Accepts header: x-admin-key: <key>  OR  Authorization: Bearer <key>
+ * Accepts: x-admin-key header or Authorization: Bearer <key>
+ * Query ?key= is allowed only outside production (simple HTML dashboard).
  */
 export function requireAdmin(req, res, next) {
   const configured = String(env.ADMIN_API_KEY || '').trim();
@@ -23,7 +24,8 @@ export function requireAdmin(req, res, next) {
   const headerKey = req.get('x-admin-key');
   const auth = req.get('authorization') || '';
   const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
-  const queryKey = typeof req.query.key === 'string' ? req.query.key : '';
+  const queryKey =
+    env.NODE_ENV !== 'production' && typeof req.query.key === 'string' ? req.query.key : '';
   const provided = headerKey || bearer || queryKey;
 
   if (!provided || !safeEqual(provided, configured)) {
