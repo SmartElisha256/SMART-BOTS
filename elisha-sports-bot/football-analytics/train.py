@@ -25,7 +25,7 @@ def main():
 
     raw = load_matches(args.data)
     if "source" in raw.columns and raw["source"].astype(str).str.lower().eq("synthetic").any():
-        raise SystemExit("Refusing to train on synthetic-only data. Use real season CSVs.")
+        raise SystemExit("Refusing to train on any dataset containing synthetic rows. Use verified real match data.")
 
     frame = build_training_frame(raw).sort_values("match_date", kind="stable").reset_index(drop=True)
     if len(frame) < 50:
