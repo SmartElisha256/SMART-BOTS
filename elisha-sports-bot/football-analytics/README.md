@@ -22,6 +22,7 @@ Python 3.10+ is recommended. From this directory:
     # Train artifacts, then evaluate on a chronological holdout.
     python train.py --data data/epl_historical.csv
     python evaluate.py --data data/epl_historical.csv
+    python evaluate_walkforward.py --data data/epl_historical.csv
     pytest -q
 
 Training is a separate operation. Runtime predictions only load saved artifacts; they do not retrain models. Generated model files are ignored by Git and must be created in each deployment environment.
@@ -45,16 +46,22 @@ The audit deliberately excludes invalid rows from its team-form summary and repo
 
 The command prints JSON. It requires trained artifacts and at least 20 completed historical matches before the prediction cutoff.
 
-## Optional CSV fetch
+## Optional newer-results provider workflow (not enabled by default)
 
-Set FOOTBALL_RESULTS_CSV_URL to a trusted HTTPS URL returning a CSV with columns match_date,home_team,away_team,home_goals,away_goals, then run:
+The repository does not ship provider credentials and this workflow is **not live until you configure and verify a suitable licensed source**. Configure `FOOTBALL_RESULTS_CSV_URL` to an HTTPS CSV export with normalized columns `match_date,home_team,away_team,home_goals,away_goals`. The export must contain completed matches only and only dates strictly newer than the bundled EPL history. The operator must review commercial-use/licensing terms, then explicitly attest by setting `FOOTBALL_RESULTS_LICENSE_CONFIRMED=true`; this is not an automated legal check.
 
-    python fetch_matches.py --output data/matches.csv
-    python download_data.py --input data/matches.csv
-    python train.py --data data/matches.csv
-    python evaluate.py --data data/matches.csv
+    export FOOTBALL_RESULTS_CSV_URL="https://your-licensed-provider.example/results.csv"
+    export FOOTBALL_RESULTS_LICENSE_CONFIRMED=true
+    python fetch_matches.py --output data/provider_matches.csv
+    python prepare_epl_data.py
+    python audit_data.py --data data/epl_historical.csv
+    python train.py --data data/epl_historical.csv
+    python evaluate.py --data data/epl_historical.csv
+    python evaluate_walkforward.py --data data/epl_historical.csv
 
-No API key or live provider is configured by default. Check data licensing and provider limits. Do not label a dataset official unless its source confirms that.
+The fetcher validates the schema, dates, team names, scores, duplicate fixtures and freshness before replacing `data/provider_matches.csv`. Failed downloads or validation leave the previous provider file untouched. A manifest records the provider host, update timestamp, match date range, freshness age and SHA-256; it deliberately does not save URL query credentials. The preparation step refuses provider rows that overlap the bundled date range and atomically preserves the last known good combined dataset if validation fails.
+
+This is a configurable CSV adapter, not a named-provider integration or live-fixture API. No source is configured in this repository by default. Never invent fixtures, injuries, suspensions, lineups or live statistics. Review the provider licence and coverage yourself; an HTTPS URL alone does not prove that data is licensed or authentic.
 
 ## Node.js endpoint
 
@@ -68,6 +75,6 @@ It runs predict.py as a separate process with a timeout. Train models first and 
 
 Pre-match model features use only earlier matches (rolling last-five appearances per team): points/form, goals for and against, match counts, rest days, and rolling shots, shots on target, corners, fouls, yellow cards and red cards where those columns exist in the historical source. Per-feature coverage counts distinguish missing statistics from genuine zero averages. The preparation script preserves these optional columns from football-data.co.uk files. The baseline trains a random-forest result classifier and goal regressors. The primary 1X2, double-chance, goal-line, BTTS and correct-score probabilities are derived from the same independent-Poisson score model, so related markets are internally consistent. The separate machine_learning_result field exposes the classifier's 1X2 probabilities for comparison rather than silently mixing incompatible model outputs.
 
-Evaluation uses a chronological holdout. Before relying on results, add larger and more recent licensed data, probability calibration, season-by-season backtests, and ongoing monitoring. A single holdout or high accuracy score is not a guarantee of future performance.
+Evaluation reports a strict date-based holdout and season-style walk-forward folds, with sample sizes, date ranges, accuracy, balanced accuracy, log loss, multiclass Brier score, top-label calibration bins, goal MAE and a training-only majority-class baseline. The split helper rejects overlapping or non-chronological train/test dates. A single holdout or high accuracy score is not a guarantee of future performance; the holdout metrics printed by training are diagnostic and must not be described as an independent final test after the model is refit on all rows.
 
 The API returns the feature list, historical date range, optional-stat coverage, form summaries, expected goals, top correct-score estimates, data-quality warnings and conservative confidence labels. Important: the model does not directly train on player identities, injuries, suspensions, confirmed lineups or live news because the committed historical training CSVs do not contain reliable per-player match features. The separate match-context layer attempts to retrieve squad availability, lineups and team-strength information for the AI explanation; each field must be marked unavailable if no provider data is found. Do not describe these contextual signals as model inputs. The five committed EPL seasons end in 2024/25; this is historical data, not live 2026 data. To include current seasons, add licensed current match data, run the preparation/training workflow, then evaluate it chronologically before trusting it. Probabilities are estimates, not guarantees or financial advice.
