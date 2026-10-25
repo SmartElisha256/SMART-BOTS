@@ -73,24 +73,42 @@ def predict(payload: dict, data_path="data/epl_historical.csv", models_dir="mode
     feat = features_for_fixture(raw, home, away, kickoff=kickoff)
     X = pd.DataFrame([{name: float(feat.get(name, 0.0)) for name in feature_names}])[feature_names]
 
+    # Classifier 1X2 (reported separately — not mixed into score-derived markets).
     proba = classifier.predict_proba(X)[0]
     classes = list(encoder.classes_)
     class_probs = {cls: float(p) for cls, p in zip(classes, proba)}
-    result_probs = _normalise({
+    ml_result = _normalise({
         "home_win": class_probs.get("H", 0.0),
         "draw": class_probs.get("D", 0.0),
         "away_win": class_probs.get("A", 0.0),
     })
+    ml_result["predicted_label"] = max(
+        ("home_win", "draw", "away_win"), key=lambda k: ml_result[k]
+    )
 
+    # Expected goals from dedicated regressors → independent Poisson score model.
     home_xg = float(max(0.05, min(5.0, home_model.predict(X)[0])))
     away_xg = float(max(0.05, min(5.0, away_model.predict(X)[0])))
 
     score_matrix = {}
-    for hg in range(0, 7):
-        for ag in range(0, 7):
+    for hg in range(0, 8):
+        for ag in range(0, 8):
             score_matrix[(hg, ag)] = poisson_pmf(hg, home_xg) * poisson_pmf(ag, away_xg)
     total_p = sum(score_matrix.values()) or 1.0
     score_matrix = {k: v / total_p for k, v in score_matrix.items()}
+
+    # Primary match_result markets are derived from the same Poisson score model as
+    # correct-score / BTTS / totals so they stay internally consistent.
+    poisson_1x2 = {"home_win": 0.0, "draw": 0.0, "away_win": 0.0}
+    for (hg, ag), p in score_matrix.items():
+        if hg > ag:
+            poisson_1x2["home_win"] += p
+        elif hg == ag:
+            poisson_1x2["draw"] += p
+        else:
+            poisson_1x2["away_win"] += p
+    result_probs = _normalise(poisson_1x2)
+
     scores = sorted(
         [{"home": h, "away": a, "probability": float(p)} for (h, a), p in score_matrix.items()],
         key=lambda item: item["probability"],
@@ -99,13 +117,6 @@ def predict(payload: dict, data_path="data/epl_historical.csv", models_dir="mode
     over25 = sum(p for (h, a), p in score_matrix.items() if h + a > 2)
     under25 = 1.0 - over25
     btts_yes = sum(p for (h, a), p in score_matrix.items() if h > 0 and a > 0)
-
-    ml_result = {
-        "home_win": result_probs["home_win"],
-        "draw": result_probs["draw"],
-        "away_win": result_probs["away_win"],
-        "predicted_label": max(result_probs, key=result_probs.get),
-    }
     goal_lines = {
         "over_2_5": float(over25),
         "under_2_5": float(under25),
