@@ -20,6 +20,7 @@ import { runAnalyzeCommand, runTipCommand } from '../commands/analyzeCommand.js'
 import { addAnalysisJob, isQueueAvailable } from '../jobs/queue.js';
 import { maybeAppendUpgradePrompt } from './conversionService.js';
 import { submitFeedback } from './feedbackService.js';
+import { formatPaymentInstructions } from './manualPaymentService.js';
 
 const commandRequestSchema = z.object({
   sender: z.string().min(5),
@@ -119,7 +120,7 @@ export async function processIncomingMessage(input) {
           break;
 
         case 'upgrade':
-          reply = 'Reply UPGRADE to see Premium plans and payment instructions.';
+          reply = formatPaymentInstructions();
           break;
 
         case 'leagues':
