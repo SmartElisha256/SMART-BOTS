@@ -12,7 +12,7 @@ from pathlib import Path
 from features import load_matches
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
-SEASON_FILE_RE = re.compile(r"^epl_\\d{4}_\\d{2}\\.csv$")
+SEASON_FILE_RE = re.compile(r"^epl_\d{4}_\d{2}\.csv$")
 
 
 def list_season_files(data_dir: Path = DATA_DIR) -> list[str]:
