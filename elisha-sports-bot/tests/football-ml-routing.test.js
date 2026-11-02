@@ -25,14 +25,15 @@ test('ML prediction formatter safely renders supported output', () => {
     expected_goals: { home: 1.7, away: 1.1 },
     correct_score: [{ score: '1-1', probability: 0.12 }],
     confidence: { level: 'limited' },
-    data_quality: { historical_matches: 500, warnings: [] }
+    data_quality: { historical_matches: 500, warnings: [], status: 'ok' },
+    features_used: { player_data_in_model: false }
   });
   assert.match(text, /Arsenal vs Chelsea/);
   assert.match(text, /Home win: 50\.0%/);
   assert.match(text, /BTTS Yes: 60\.0%/);
   assert.match(text, /not betting advice|not guarantees/);
+  assert.match(text, /Player injuries\/lineups: not in the ML model/);
 });
-
 
 test('ML formatter does not invent probabilities when a fixture is unavailable', () => {
   const text = formatMlPrediction({

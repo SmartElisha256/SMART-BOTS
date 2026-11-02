@@ -193,8 +193,14 @@ export function formatMlPrediction(prediction) {
     `• ML Home: ${pct(ml.home_win)} | Draw: ${pct(ml.draw)} | Away: ${pct(ml.away_win)}`,
     '',
     `Confidence: ${prediction.confidence?.level ?? 'unavailable'}; historical matches: ${prediction.data_quality?.historical_matches ?? 'unknown'}`,
-    `Data: ${prediction.data_quality?.history_date_range?.from ?? '?'} → ${prediction.data_quality?.history_date_range?.to ?? '?'}`,
+    `Data status: ${prediction.data_quality?.status ?? 'unknown'} | ${prediction.data_quality?.history_date_range?.from ?? '?'} → ${prediction.data_quality?.history_date_range?.to ?? '?'}`,
     `Model: ${prediction.model?.version ?? prediction.model?.name ?? 'unknown'}`,
+    prediction.features_used?.player_data_in_model === false
+      ? 'Player injuries/lineups: not in the ML model (historical form/Elo/H2H only).'
+      : null,
+    prediction.correct_score_note
+      ? `Note: ${prediction.correct_score_note}`
+      : null,
     ht.available === false ? `Half-time markets: unavailable — ${ht.reason || 'no HT model'}` : null,
     warnings.length ? `Warnings: ${warnings.join(' | ')}` : null,
     '',
