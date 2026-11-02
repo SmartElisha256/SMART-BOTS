@@ -1,13 +1,46 @@
 """Combine football-data.co.uk EPL season CSVs into a normalized training dataset."""
 from pathlib import Path
+import re
+import json
 import os
 import tempfile
 import pandas as pd
 from features import load_matches
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
-SEASON_FILES = ["epl_2020_21.csv", "epl_2021_22.csv", "epl_2022_23.csv", "epl_2023_24.csv", "epl_2024_25.csv"]
+# Preferred explicit list; any additional epl_YYYY_YY.csv files are discovered automatically.
+KNOWN_SEASON_FILES = [
+    "epl_2020_21.csv",
+    "epl_2021_22.csv",
+    "epl_2022_23.csv",
+    "epl_2023_24.csv",
+    "epl_2024_25.csv",
+    "epl_2025_26.csv",  # optional until the file is added
+]
 OUTPUT = DATA_DIR / "epl_historical.csv"
+METADATA = DATA_DIR / "dataset_metadata.json"
+
+
+def discover_season_files() -> list[str]:
+    """Return sorted season CSV filenames present under data/.
+
+    Only accepts epl_YYYY_YY.csv (not epl_historical.csv or synthetic files).
+    """
+    season_re = re.compile(r"^epl_\d{4}_\d{2}\.csv$")
+    found = {
+        path.name
+        for path in DATA_DIR.glob("epl_*.csv")
+        if path.is_file() and season_re.match(path.name)
+    }
+    ordered = [name for name in KNOWN_SEASON_FILES if name in found]
+    extras = sorted(found - set(KNOWN_SEASON_FILES))
+    ordered.extend(extras)
+    if not ordered:
+        raise FileNotFoundError(
+            f"No EPL season CSVs found in {DATA_DIR}. Expected files like epl_2024_25.csv."
+        )
+    return ordered
+
 OPTIONAL = {
     "HS": "home_shots", "AS": "away_shots",
     "HST": "home_shots_on_target", "AST": "away_shots_on_target",
@@ -18,8 +51,9 @@ OPTIONAL = {
 }
 
 def main():
+    season_files = discover_season_files()
     frames = []
-    for filename in SEASON_FILES:
+    for filename in season_files:
         path = DATA_DIR / filename
         if not path.exists():
             raise FileNotFoundError(f"Missing season file: {path}")
@@ -74,13 +108,24 @@ def main():
             combined.to_csv(tmp, index=False, date_format="%Y-%m-%dT%H:%M:%SZ")
             tmp.flush()
             os.fsync(tmp.fileno())
-        # Validate the assembled output before replacing the last known good file.
         load_matches(temp_name)
         os.replace(temp_name, OUTPUT)
         temp_name = None
     finally:
         if temp_name and os.path.exists(temp_name):
             os.unlink(temp_name)
+    meta = {
+        "output": str(OUTPUT.name),
+        "match_count": int(len(combined)),
+        "date_from": str(combined["match_date"].min().date()),
+        "date_to": str(combined["match_date"].max().date()),
+        "season_files": season_files,
+        "provider_merged": provider_path.exists(),
+        "updated_at_utc": pd.Timestamp.now(tz="UTC").isoformat(),
+        "note": "Not automatically current for unfinished seasons; retrain after adding new CSVs.",
+    }
+    METADATA.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+    print(f"Wrote dataset metadata to {METADATA}")
     print(f"Saved {len(combined)} completed EPL matches to {OUTPUT}")
     print(f"Date range: {combined['match_date'].min().date()} to {combined['match_date'].max().date()}")
     print("Optional match statistics included: " + ", ".join(c for c in OPTIONAL.values() if c in combined.columns))
