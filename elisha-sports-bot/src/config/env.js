@@ -44,12 +44,10 @@ const envSchema = z.object({
   MOMO_MERCHANT_CODE: z.string().default('SET_YOUR_MERCHANT_CODE'),
   MOMO_MERCHANT_NAME: z.string().default(''),
   PAYMENT_ADMIN_PHONES: z.string().default(''),
-  // Private web admin dashboard (/admin). Required to use the dashboard.
   ADMIN_API_KEY: z.string().default('replace-me')
 });
 
 export const env = envSchema.parse(process.env);
-
 export const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 function isPlaceholder(value) {
@@ -58,42 +56,27 @@ function isPlaceholder(value) {
 }
 
 export function validateEnvironment() {
-  const requiredVars = ['DATABASE_URL', 'REDIS_URL'];
-  const missing = requiredVars.filter((key) => !process.env[key]);
+  const issues = [];
 
-  if (missing.length > 0) {
-    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
-  }
+  if (!process.env.DATABASE_URL) issues.push('DATABASE_URL');
+  if (!process.env.REDIS_URL) issues.push('REDIS_URL');
 
-  const productionIssues = [];
   if (env.NODE_ENV === 'production') {
-    if (env.MESSAGING_PROVIDER === 'mock') {
-      productionIssues.push('MESSAGING_PROVIDER (mock is not allowed in production; use whatsapp-cloud)');
-    }
-    if (env.SPORTS_DATA_PROVIDER === 'mock') {
-      productionIssues.push('SPORTS_DATA_PROVIDER (mock is not allowed in production; use api-football)');
-    }
-    if (env.MESSAGING_PROVIDER === 'whatsapp-cloud') {
-      if (isPlaceholder(env.WHATSAPP_TOKEN)) productionIssues.push('WHATSAPP_TOKEN');
-      if (isPlaceholder(env.WHATSAPP_PHONE_NUMBER_ID)) productionIssues.push('WHATSAPP_PHONE_NUMBER_ID');
-      if (isPlaceholder(env.WHATSAPP_WEBHOOK_VERIFY_TOKEN)) productionIssues.push('WHATSAPP_WEBHOOK_VERIFY_TOKEN');
-      if (isPlaceholder(env.WHATSAPP_APP_SECRET)) productionIssues.push('WHATSAPP_APP_SECRET');
-    }
-    if (isPlaceholder(env.MOMO_MERCHANT_CODE) || isPlaceholder(env.MOMO_MERCHANT_NAME) || !env.MOMO_NETWORK) {
-      productionIssues.push('MOMO_NETWORK / MOMO_MERCHANT_CODE / MOMO_MERCHANT_NAME');
-    }
-    if (!String(env.PAYMENT_ADMIN_PHONES || '').trim()) {
-      productionIssues.push('PAYMENT_ADMIN_PHONES');
-    }
-    if (isPlaceholder(env.DATABASE_URL) || env.DATABASE_URL.includes('change-me')) {
-      productionIssues.push('DATABASE_URL');
-    }
+    if (env.MESSAGING_PROVIDER !== 'whatsapp-cloud') issues.push('MESSAGING_PROVIDER must be whatsapp-cloud in production');
+    if (env.SPORTS_DATA_PROVIDER !== 'api-football') issues.push('SPORTS_DATA_PROVIDER must be api-football in production');
+    if (isPlaceholder(env.WHATSAPP_TOKEN)) issues.push('WHATSAPP_TOKEN');
+    if (isPlaceholder(env.WHATSAPP_PHONE_NUMBER_ID)) issues.push('WHATSAPP_PHONE_NUMBER_ID');
+    if (isPlaceholder(env.WHATSAPP_WEBHOOK_VERIFY_TOKEN)) issues.push('WHATSAPP_WEBHOOK_VERIFY_TOKEN');
+    if (isPlaceholder(env.WHATSAPP_APP_SECRET)) issues.push('WHATSAPP_APP_SECRET');
+    if (isPlaceholder(env.DATABASE_URL) || env.DATABASE_URL.includes('change-me')) issues.push('DATABASE_URL');
+    if (isPlaceholder(env.MOMO_MERCHANT_CODE) || isPlaceholder(env.MOMO_MERCHANT_NAME) || !env.MOMO_NETWORK) issues.push('MOMO_NETWORK / MOMO_MERCHANT_CODE / MOMO_MERCHANT_NAME');
+    if (!String(env.PAYMENT_ADMIN_PHONES || '').trim()) issues.push('PAYMENT_ADMIN_PHONES');
+    if (!env.ADMIN_API_KEY || isPlaceholder(env.ADMIN_API_KEY)) issues.push('ADMIN_API_KEY');
+    if (!env.OPENAI_API_KEY) issues.push('OPENAI_API_KEY');
   }
 
-  if (productionIssues.length) {
-    throw new Error(
-      'Production configuration incomplete. Replace placeholders for: ' + productionIssues.join(', ')
-    );
+  if (issues.length) {
+    throw new Error('Production configuration incomplete. Replace placeholders for: ' + issues.join(', '));
   }
 
   return {
