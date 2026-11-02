@@ -9,14 +9,21 @@ Bundled CSV seasons (English Premier League, football-data.co.uk style):
 | `epl_2022_23.csv` | 2022/23 |
 | `epl_2023_24.csv` | 2023/24 |
 | `epl_2024_25.csv` | 2024/25 |
+| `epl_2025_26.csv` | 2025/26 (optional — add when available) |
 
-This is **not** automatically current for the 2025/26 or 2026 calendar season.
-Run `prepare_epl_data.py` after adding new season files, then retrain with `train.py`.
+This is **not** automatically current for unfinished seasons or the live calendar.
+
+## Update workflow
+
+```bash
+cd elisha-sports-bot/football-analytics
+# Optional licensed HTTPS CSV (requires FOOTBALL_RESULTS_CSV_URL + FOOTBALL_RESULTS_LICENSE_CONFIRMED=true)
+python3 fetch_matches.py
+# Rebuild normalized history (discovers all epl_YYYY_YY.csv present)
+python3 prepare_epl_data.py
+# Or one shot:
+python3 update_pipeline.py --train --evaluate
+```
 
 `synthetic_matches.csv` and `unit_test_historical_mini.csv` are for tests only.
-`train.py` refuses synthetic-only training.
-
-
-## Current-data status and provider setup
-
-Bundled history ends in 2024/25. There is no provider URL, API key, or licensed current-season feed configured in the repository by default. To append newer completed results, configure the optional workflow documented in `../README.md`; it writes a separate `provider_matches.csv`, records a freshness manifest, and only includes provider rows strictly newer than the bundled date range. Predictions must expose stale-data warnings when the latest available result is too old for the requested cutoff. A provider update is not verified until its source, licence, coverage, and resulting date range have been checked.
+`train.py` refuses synthetic rows.
