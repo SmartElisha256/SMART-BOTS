@@ -119,6 +119,10 @@ export async function processIncomingMessage(input) {
           reply = getHelpMessage();
           break;
 
+        case 'support':
+          reply = '🛟 SUPPORT\n\nFor a bug, suggestion, or account issue, send FEEDBACK followed by a short description. For payment verification, send PAYMENT followed by your transaction ID. An administrator will review submitted requests; never share your PIN or password.\n\nSend HELP for usage examples.';
+          break;
+
         case 'upgrade':
           reply = formatPaymentInstructions();
           break;
