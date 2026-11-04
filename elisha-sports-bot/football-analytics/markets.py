@@ -238,6 +238,8 @@ def markets_from_score_matrix(
     }
     if grid_meta:
         meta.update(grid_meta)
+        if grid_meta.get("dependence") == "dixon_coles":
+            meta["source"] = "dixon_coles_score_matrix"
 
     return {
         "match_result": result,
