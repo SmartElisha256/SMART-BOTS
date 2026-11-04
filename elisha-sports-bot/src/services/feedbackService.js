@@ -11,7 +11,7 @@ const categories = [
   { cat: 'payment', re: /\b(pay|payment|premium|upgrade|money|airtel|momo|transaction|subscription)\b/i },
   { cat: 'tip', re: /\b(prediction|predict|accuracy|analysis|analyze|match model|model result)\b/i },
   { cat: 'feature', re: /\b(add|feature|suggestion|improve|wish|should have|request|support .* league|coverage)\b/i },
-  { cat: 'bug', re: /\b(bug|broken|error|crash|not work|doesn't work|does not work|fail|glitch|issue|problem)\b/i },
+  { cat: 'bug', re: /\b(bug|broken|error|crash(?:es|ed|ing)?|not work|doesn't work|does not work|fail|glitch|issue|problem)\b/i },
   { cat: 'praise', re: /\b(love|great|awesome|thank|thanks|good job|excellent|nice|helpful)\b/i }
 ];
 
