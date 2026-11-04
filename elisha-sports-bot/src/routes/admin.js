@@ -274,8 +274,7 @@ async function api(path, opts = {}) {
 }
 async function loadDigest() {
   document.getElementById('digest').textContent = JSON.stringify(await api('/admin/api/digest'), null, 2);
-  const fb = document.getElementById('feedback');
-  if (fb) fb.textContent = JSON.stringify((await api('/admin/api/feedback?limit=20')).rows || [], null, 2);
+  await loadFeedback();
 }
 
 function addText(parent, tag, value, className) {
