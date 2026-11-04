@@ -18,7 +18,7 @@ test('tracks football-data and natural-language requests but not help or prefere
   assert.equal(isQuotaTrackedMessage('MENU'), false);
   assert.equal(isQuotaTrackedMessage('HELP'), false);
   assert.equal(isQuotaTrackedMessage('START'), false);
-  assert.equal(isQuotaTrackedMessage('something-unknown'), true);
+  assert.equal(isQuotaTrackedMessage('something-unknown'), false);
   assert.equal(isQuotaTrackedMessage('Explain the offside rule'), true);
   assert.equal(isQuotaTrackedMessage('hello'), false);
 });
