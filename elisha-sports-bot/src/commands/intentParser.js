@@ -10,7 +10,10 @@ export function interpretNaturalLanguage(input) {
     .replace(/[?!.,]+$/g, '')
     .replace(/\s+/g, ' ');
 
-  if (!text) return { command: null, args: null, raw: text };\n  if (/\\b(contact|talk to|speak to|reach) (?:the )?(?:admin|administrator|support|developer)\\b|\\b(admin contact|support contact)\\b/.test(text)) {\n    return { command: 'support', args: null, raw: text };\n  }
+  if (!text) return { command: null, args: null, raw: text };
+  if (/\b(contact|talk to|speak to|reach) (?:the )?(?:admin|administrator|support|developer)\b|\b(admin contact|support contact)\b/.test(text)) {
+    return { command: 'support', args: null, raw: text };
+  }
   if (/^(hi|hello|hey|good morning|good afternoon|good evening)\b/.test(text)) {
     return { command: 'menu', args: null, raw: text };
   }
