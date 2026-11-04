@@ -331,7 +331,8 @@ async function loadFeedback() {
     actions.append(statusSelect,categorySelect,notes,save); card.appendChild(actions); list.appendChild(card);
   });
 }
-\nasync function loadStatus() {
+
+async function loadStatus() {
   document.getElementById('status').textContent = JSON.stringify(await api('/admin/api/status'), null, 2);
 }
 async function loadPayments() {
