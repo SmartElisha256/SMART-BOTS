@@ -13,6 +13,8 @@ import pandas as pd
 
 from features import FEATURES, features_for_fixture, load_matches, team_form
 from markets import markets_from_score_matrix, market_rows_for_display, build_poisson_score_matrix
+from dixon_coles import build_dixon_coles_score_matrix
+from calibration import apply_multiclass_isotonic
 
 
 def poisson_pmf(k: int, rate: float) -> float:
@@ -99,7 +101,13 @@ def predict(payload: dict, data_path="data/epl_historical.csv", models_dir="mode
         }
     X = pd.DataFrame([{name: float(feat.get(name, 0.0)) for name in feature_names}])[feature_names]
 
-    proba = classifier.predict_proba(X)[0]
+    proba = classifier.predict_proba(X)
+    calibrators = result_artifact.get("isotonic_calibrators")
+    ml_calibrated = False
+    if calibrators:
+        proba = apply_multiclass_isotonic(proba, calibrators)
+        ml_calibrated = True
+    proba = proba[0]
     classes = list(encoder.classes_)
     class_probs = {cls: float(p) for cls, p in zip(classes, proba)}
     ml_result = _normalise({
@@ -110,11 +118,25 @@ def predict(payload: dict, data_path="data/epl_historical.csv", models_dir="mode
     ml_result["predicted_label"] = max(
         ("home_win", "draw", "away_win"), key=lambda k: ml_result[k]
     )
+    ml_result["calibrated"] = ml_calibrated
 
     home_xg = float(max(0.05, min(5.0, home_model.predict(X)[0])))
     away_xg = float(max(0.05, min(5.0, away_model.predict(X)[0])))
 
-    score_matrix, grid_meta = build_poisson_score_matrix(home_xg, away_xg)
+    rho = 0.0
+    rho_warning = None
+    rho_path = models / "dixon_coles.json"
+    if rho_path.exists():
+        try:
+            rho_payload = json.loads(rho_path.read_text())
+            rho = float(rho_payload.get("rho", 0.0))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            rho_warning = "Dixon–Coles rho file could not be read; independent Poisson was used."
+            rho = 0.0
+    if abs(rho) < 1e-12:
+        score_matrix, grid_meta = build_poisson_score_matrix(home_xg, away_xg)
+    else:
+        score_matrix, grid_meta = build_dixon_coles_score_matrix(home_xg, away_xg, rho)
     max_goals = int(grid_meta["max_goals_per_team"])
 
     markets = markets_from_score_matrix(
@@ -126,6 +148,8 @@ def predict(payload: dict, data_path="data/epl_historical.csv", models_dir="mode
 
     is_synthetic = bool(result_artifact.get("synthetic_data"))
     warnings = []
+    if rho_warning:
+        warnings.append(rho_warning)
     if kickoff:
         try:
             ko = pd.to_datetime(kickoff, utc=True)
