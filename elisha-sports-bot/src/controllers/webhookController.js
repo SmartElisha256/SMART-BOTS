@@ -5,7 +5,7 @@ import { createMessagingAdapter } from '../providers/messaging/factory.js';
 import { processIncomingMessage } from '../services/commandService.js';
 import { checkAndConsumeDailyRequest, recordOutgoingMessage, formatQuotaLimitMessage, claimQuotaNotice } from '../services/usageService.js';
 import { handlePaymentCommand, isPaymentCommand, isPaymentAdmin, getAdminPhones, getPaymentRequestByReference } from '../services/manualPaymentService.js';
-import { isDuplicateMessage } from '../utils/messageDeduplication.js';
+import { claimMessage, markMessageProcessed, markMessageFailed } from '../utils/messageDeduplication.js';
 
 function safeEqualText(left, right) {
   const a = Buffer.from(String(left ?? ''));
@@ -68,25 +68,22 @@ export async function handleIncomingWebhook(req, res) {
       for (const message of change.value?.messages ?? []) {
         if (!message.from) continue;
         const messageId = message.id ? String(message.id) : null;
-        if (messageId && isDuplicateMessage(messageId)) {
-          logger.info({ messageId, from: message.from }, 'Skipping duplicate WhatsApp message (webhook retry)');
-          continue;
-        }
+        let normalized = null;
         if (typeof message.text?.body === 'string' && message.text.body.trim()) {
-          messages.push({
-            id: messageId,
-            sender: message.from,
-            text: message.text.body.trim(),
-            type: 'text'
-          });
+          normalized = { id: messageId, sender: message.from, text: message.text.body.trim(), type: 'text' };
         } else if (message.type === 'audio' || message.type === 'image') {
-          messages.push({
-            id: messageId,
-            sender: message.from,
-            text: '',
-            type: message.type
-          });
+          normalized = { id: messageId, sender: message.from, text: '', type: message.type };
         }
+        // Ignore unsupported message types without creating a processing lease.
+        if (!normalized) continue;
+        if (messageId) {
+          const claim = await claimMessage(messageId);
+          if (!claim.claimed) {
+            logger.info({ messageId, from: message.from, status: claim.status }, 'Skipping already-claimed WhatsApp message');
+            continue;
+          }
+        }
+        messages.push(normalized);
       }
     }
   }
@@ -97,6 +94,7 @@ export async function handleIncomingWebhook(req, res) {
   const provider = createMessagingAdapter();
   try {
     for (const message of messages) {
+      try {
       let reply;
       let paymentNotification = null;
       const adminControlCommand = /^(approve|reject|setplan|changeplan|pending|pendingpayments|payments)(?:\s|$)/i.test(message.text);
@@ -108,7 +106,10 @@ export async function handleIncomingWebhook(req, res) {
           const quota = await checkAndConsumeDailyRequest(message.sender, message.type === 'audio' ? '[voice note]' : '[image or screenshot]');
           if (!quota.allowed) {
             const period = quota.period === 'month' ? 'month' : 'day';
-            if (!(await claimQuotaNotice(message.sender, period))) continue;
+            if (!(await claimQuotaNotice(message.sender, period))) {
+              await markMessageProcessed(message.id);
+              continue;
+            }
             reply = formatQuotaLimitMessage(quota);
           } else {
             reply = message.type === 'audio'
@@ -122,6 +123,7 @@ export async function handleIncomingWebhook(req, res) {
         } catch (usageError) {
           logger.warn({ error: usageError, phone: message.sender }, 'Could not record outgoing message usage');
         }
+        await markMessageProcessed(message.id);
         continue;
       }
 
@@ -171,6 +173,13 @@ export async function handleIncomingWebhook(req, res) {
       }
       if (paymentNotification) {
         await notifyPaymentAdmins({ provider, sender: message.sender, ...paymentNotification });
+      }
+      await markMessageProcessed(message.id);
+      } catch (messageError) {
+        await markMessageFailed(message.id, messageError).catch((stateError) => {
+          logger.error({ stateError, messageId: message.id }, 'Could not persist failed webhook state');
+        });
+        throw messageError;
       }
     }
     return res.sendStatus(200);

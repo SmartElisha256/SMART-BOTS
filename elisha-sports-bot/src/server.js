@@ -26,6 +26,15 @@ async function verifyPersistentStorage() {
     );
   }
 
+  const webhookDedupeTable = await pool.query(
+    "SELECT to_regclass('public.whatsapp_webhook_messages') AS table_name"
+  );
+  if (!webhookDedupeTable.rows[0]?.table_name) {
+    throw new Error(
+      'Webhook deduplication database table is missing. Apply src/database/migrations/20261104_whatsapp_webhook_deduplication.sql before starting the bot.'
+    );
+  }
+
   const paymentSchema = await pool.query(
     "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'manual_payment_requests' AND column_name = 'network'"
   );
