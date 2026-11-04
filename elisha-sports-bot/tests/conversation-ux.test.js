@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { parseCommand } from '../src/commands/intentParser.js';
 import { isQuotaTrackedMessage } from '../src/services/usageService.js';
 import { getHelpMessage } from '../src/commands/messages.js';
+import { processIncomingMessage } from '../src/services/commandService.js';
 
 test('natural-language admin contact requests route to support', () => {
   for (const message of [
@@ -51,4 +52,11 @@ test('football-data commands and natural-language data requests still consume qu
 test('ordinary unrelated messages do not consume football-data quota', () => {
   assert.equal(isQuotaTrackedMessage('What is the weather?'), false);
   assert.equal(isQuotaTrackedMessage('Thanks'), false);
+});
+
+test('support intent returns a real support response', async () => {
+  const reply = await processIncomingMessage({ sender: '256700000098', message: 'How do I contact admin?', provider: 'mock' });
+  assert.match(reply, /SUPPORT/);
+  assert.match(reply, /FEEDBACK/);
+  assert.match(reply, /transaction ID/i);
 });
