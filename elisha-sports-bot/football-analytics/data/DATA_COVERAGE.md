@@ -13,6 +13,37 @@ Bundled CSV seasons (English Premier League, football-data.co.uk style):
 
 This is **not** automatically current for unfinished seasons or the live calendar.
 
+## Columns the bot uses
+
+### Mandatory (season CSV must include these)
+
+| Column | Meaning |
+|--------|---------|
+| `Date` | Match date (`DD/MM/YYYY`) — needed for chronological features |
+| `HomeTeam` | Home team name |
+| `AwayTeam` | Away team name |
+| `FTHG` | Full-time home goals |
+| `FTAG` | Full-time away goals |
+
+Without these five, `prepare_epl_data.py` rejects the file.
+
+### Optional extras (shots / corners / fouls / cards)
+
+Used when present to enrich rolling form features; safe to omit:
+
+| Column | Meaning |
+|--------|---------|
+| `HS` / `AS` | Home / away shots |
+| `HST` / `AST` | Home / away shots on target |
+| `HC` / `AC` | Home / away corners |
+| `HF` / `AF` | Home / away fouls |
+| `HY` / `AY` | Home / away yellow cards |
+| `HR` / `AR` | Home / away red cards |
+
+### Not used by the bot
+
+Odds columns (`B365*`, `PS*`, Asian handicap, over/under, etc.), half-time scores (`HTHG`, `HTAG`, `HTR`), `Div`, `Time`, and `Referee` are ignored by train/predict.
+
 ## Update workflow
 
 ```bash
