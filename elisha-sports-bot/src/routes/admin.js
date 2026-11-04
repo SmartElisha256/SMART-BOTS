@@ -43,15 +43,31 @@ adminRouter.get('/api/status', async (req, res) => {
 
 adminRouter.get('/api/feedback', async (req, res) => {
   const status = req.query.status ? String(req.query.status) : null;
-  const limit = Number(req.query.limit) || 30;
-  const rows = await listFeedback({ status, limit });
-  res.json({ ok: true, count: rows.length, rows });
+  const category = req.query.category ? String(req.query.category) : null;
+  const search = req.query.search ? String(req.query.search) : null;
+  const limit = Number(req.query.limit) || 50;
+  const [rows, summary] = await Promise.all([
+    listFeedback({ status, category, search, limit }),
+    getFeedbackSummary()
+  ]);
+  res.json({ ok: true, count: rows.length, rows, summary });
+});
+
+adminRouter.patch('/api/feedback/:id', async (req, res) => {
+  const result = await updateFeedback(req.params.id, {
+    status: String(req.body?.status || ''),
+    notes: req.body?.notes ?? null,
+    category: req.body?.category ?? null
+  });
+  res.status(result.ok ? 200 : 400).json(result);
 });
 
 adminRouter.post('/api/feedback/:id/reviewed', async (req, res) => {
-  const notes = req.body?.notes ?? req.query.notes ?? null;
-  const result = await markFeedbackReviewed(req.params.id, { notes });
-  res.json(result);
+  const result = await updateFeedback(req.params.id, {
+    status: 'under_review',
+    notes: req.body?.notes ?? null
+  });
+  res.status(result.ok ? 200 : 400).json(result);
 });
 
 adminRouter.get('/api/digest', async (req, res) => {
