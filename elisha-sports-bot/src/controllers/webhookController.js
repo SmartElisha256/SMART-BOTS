@@ -71,11 +71,9 @@ export async function handleIncomingWebhook(req, res) {
         let normalized = null;
         if (typeof message.text?.body === 'string' && message.text.body.trim()) {
           normalized = { id: messageId, sender: message.from, text: message.text.body.trim(), type: 'text' };
-        } else if (message.type === 'audio' || message.type === 'image') {
-          normalized = { id: messageId, sender: message.from, text: '', type: message.type };
+        } else {
+          normalized = { id: messageId, sender: message.from, text: '', type: message.type || 'unsupported' };
         }
-        // Ignore unsupported message types without creating a processing lease.
-        if (!normalized) continue;
         if (messageId) {
           const claim = await claimMessage(messageId);
           if (!claim.claimed) {
@@ -99,7 +97,17 @@ export async function handleIncomingWebhook(req, res) {
       let paymentNotification = null;
       const adminControlCommand = /^(approve|reject|setplan|changeplan|pending|pendingpayments|payments)(?:\s|$)/i.test(message.text);
 
-      if (!['text', 'audio', 'image'].includes(message.type)) {\n        reply = 'I received your message, but I can currently understand text, images, and voice notes only. Please type your request as text. Send HELP to see examples.';\n        await provider.sendMessage({ to: message.sender, text: reply });\n        try { await recordOutgoingMessage(message.sender); } catch (usageError) {\n          logger.warn({ error: usageError, phone: message.sender }, 'Could not record outgoing message usage');\n        }\n        await markMessageProcessed(message.id);\n        continue;\n      }\n\n      if (!['text', 'audio', 'image'].includes(message.type)) {\n        reply = 'I received your message, but I can currently understand text, images, and voice notes only. Please type your request as text. Send HELP to see examples.';\n        await provider.sendMessage({ to: message.sender, text: reply });\n        try { await recordOutgoingMessage(message.sender); } catch (usageError) {\n          logger.warn({ error: usageError, phone: message.sender }, 'Could not record outgoing message usage');\n        }\n        await markMessageProcessed(message.id);\n        continue;\n      }\n\n      if (message.type === 'audio' || message.type === 'image') {
+      if (!['text', 'audio', 'image'].includes(message.type)) {\n        reply = 'I received your message, but I can currently understand text, images, and voice notes only. Please type your request as text. Send HELP to see examples.';\n        await provider.sendMessage({ to: message.sender, text: reply });\n        try { await recordOutgoingMessage(message.sender); } catch (usageError) {\n          logger.warn({ error: usageError, phone: message.sender }, 'Could not record outgoing message usage');\n        }\n        await markMessageProcessed(message.id);\n        continue;\n      }\n\n      if (message.type !== 'text' && message.type !== 'audio' && message.type !== 'image') {
+        reply = 'I received your message, but I can currently understand text, images, and voice notes only. Please type your request as text. Send HELP to see examples.';
+        await provider.sendMessage({ to: message.sender, text: reply });
+        try { await recordOutgoingMessage(message.sender); } catch (usageError) {
+          logger.warn({ error: usageError, phone: message.sender }, 'Could not record outgoing message usage');
+        }
+        await markMessageProcessed(message.id);
+        continue;
+      }
+
+      if (message.type === 'audio' || message.type === 'image') {
         if (isPaymentAdmin(message.sender)) {
           reply = '🔐 This number is reserved for payment alerts and admin controls. Use the customer-facing bot number for sports features.';
         } else {
@@ -155,7 +163,10 @@ export async function handleIncomingWebhook(req, res) {
           const period = quota.period === 'month' ? 'month' : 'day';
           // Once the user has received this period's limit notice, stop replying
           // to repeated over-limit commands to avoid unnecessary WhatsApp charges.
-          if (!(await claimQuotaNotice(message.sender, period))) {\n            await markMessageProcessed(message.id);\n            continue;\n          }
+          if (!(await claimQuotaNotice(message.sender, period))) {
+            await markMessageProcessed(message.id);
+            continue;
+          }
           reply = formatQuotaLimitMessage(quota);
         } else {
           reply = await processIncomingMessage({ sender: message.sender, message: message.text, provider: 'whatsapp' });
