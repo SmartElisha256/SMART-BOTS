@@ -88,7 +88,7 @@ export function isQuotaTrackedMessage(message) {
   const firstWord = getCommandName(text);
   if (QUOTA_TRACKED_COMMANDS.has(firstWord)) return true;
   // Natural-language requests that clearly ask for football data still count.
-  return /\b(football|soccer|match|matches|fixture|fixtures|live score|standings|league table|form of|recent form|head.to.head|h2h|vs\.?|versus|upcoming games|who is playing|team statistics|player statistics|offside|false nine|tactic|tactics|formation|football rule|football rules|how is .+ doing|how are .+ doing|explain .+ (?:rule|position|tactic)|what is .+ (?:football|soccer|rule|position|tactic))\b/i.test(text);
+  return /\b(football|soccer|match|matches|fixture|fixtures|live score|standings|league table|form of|recent form|head.to.head|h2h|vs\.?|versus|upcoming games|who is playing|team statistics|player statistics|offside|false nine|tactic|tactics|formation|football rule|football rules|how is .+ doing|how are .+ doing|explain .+ (?:rule|position|tactic)|what is .+ (?:football|soccer|rule|position|tactic|false nine))\b/i.test(text);
 }
 
 export function getDailyRequestLimit(plan = 'free') {
