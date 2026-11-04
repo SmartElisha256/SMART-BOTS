@@ -81,13 +81,17 @@ export function getCommandName(message) {
 export function isQuotaTrackedMessage(message) {
   const text = String(message ?? '').trim();
   if (!text) return false;
-  // Keep simple navigation/preferences free, but count open-ended questions
-  // because they may invoke the AI provider and consume paid tokens.
-  if (/^(menu|help|start|stop|upgrade|hi|hello|hey|good morning|good afternoon|good evening)$/i.test(text)) {
+  // Keep navigation, account, payment and support actions available at all times.
+  if (/^(menu|help|start|stop|upgrade|support|contact|admin|feedback|review|suggestion|report|hi|hello|hey|good morning|good afternoon|good evening)(?:\\s|$)/i.test(text)) {
     return false;
   }
-  return true;
-}export function getDailyRequestLimit(plan = 'free') {
+  const firstWord = getCommandName(text);
+  if (QUOTA_TRACKED_COMMANDS.has(firstWord)) return true;
+  // Natural-language requests that clearly ask for football data still count.
+  return /\\b(football|soccer|match|matches|fixture|fixtures|live score|standings|league table|form of|recent form|head.to.head|h2h|vs\\.?|versus|upcoming games|who is playing|team statistics|player statistics)\\b/i.test(text);
+}
+
+export function getDailyRequestLimit(plan = 'free') {
   return plan === 'premium'
     ? env.PREMIUM_DAILY_REQUEST_LIMIT
     : env.FREE_DAILY_REQUEST_LIMIT;
