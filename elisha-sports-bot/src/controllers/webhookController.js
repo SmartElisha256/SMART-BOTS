@@ -112,7 +112,10 @@ export async function handleIncomingWebhook(req, res) {
           const quota = await checkAndConsumeDailyRequest(message.sender, message.type === 'audio' ? '[voice note]' : '[image or screenshot]');
           if (!quota.allowed) {
             const period = quota.period === 'month' ? 'month' : 'day';
-            if (!(await claimQuotaNotice(message.sender, period))) continue;
+            if (!(await claimQuotaNotice(message.sender, period))) {
+              await markMessageProcessed(message.id);
+              continue;
+            }
             reply = formatQuotaLimitMessage(quota);
           } else {
             reply = message.type === 'audio'
@@ -126,6 +129,7 @@ export async function handleIncomingWebhook(req, res) {
         } catch (usageError) {
           logger.warn({ error: usageError, phone: message.sender }, 'Could not record outgoing message usage');
         }
+        await markMessageProcessed(message.id);
         continue;
       }
 
