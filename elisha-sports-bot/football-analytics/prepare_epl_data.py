@@ -41,6 +41,10 @@ def discover_season_files() -> list[str]:
         )
     return ordered
 
+# football-data.co.uk season CSVs — what the bot requires vs optional extras.
+# Date is required so features can be computed only from matches before kickoff.
+REQUIRED_SEASON_COLUMNS = {"Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG"}
+# Shot / corner / foul / card columns are optional extras (used when present).
 OPTIONAL = {
     "HS": "home_shots", "AS": "away_shots",
     "HST": "home_shots_on_target", "AST": "away_shots_on_target",
@@ -58,10 +62,14 @@ def main():
         if not path.exists():
             raise FileNotFoundError(f"Missing season file: {path}")
         df = pd.read_csv(path, encoding="utf-8-sig")
-        required = {"Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG"}
-        missing = required - set(df.columns)
+        missing = REQUIRED_SEASON_COLUMNS - set(df.columns)
         if missing:
-            raise ValueError(f"{filename} is missing columns: {', '.join(sorted(missing))}")
+            raise ValueError(
+                f"{filename} is missing mandatory columns: {', '.join(sorted(missing))}. "
+                "Required: Date, HomeTeam, AwayTeam, FTHG, FTAG. "
+                "Optional extras (shots/corners/fouls/cards): "
+                + ", ".join(sorted(OPTIONAL.keys()))
+            )
         normalized = pd.DataFrame({
             "match_date": pd.to_datetime(df["Date"], format="%d/%m/%Y", errors="coerce", dayfirst=True, utc=True),
             "home_team": df["HomeTeam"].astype("string").str.strip(),
