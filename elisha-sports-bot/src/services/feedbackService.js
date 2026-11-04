@@ -35,7 +35,8 @@ async function consumeFeedbackLimit(phone) {
          ELSE feedback_rate_limits.window_started_at END,
        submissions = CASE
          WHEN feedback_rate_limits.window_started_at < NOW() - ($2 * INTERVAL '1 second') THEN 1
-         ELSE feedback_rate_limits.submissions + 1 END
+         ELSE feedback_rate_limits.submissions + 1 END,
+       updated_at = NOW()
      RETURNING submissions`,
     [String(phone || ''), RATE_WINDOW_SECONDS]
   );
@@ -130,6 +131,8 @@ export async function getFeedbackSummary() {
 export async function updateFeedback(id, { status, notes = null, category = null } = {}) {
   const allowedStatuses = ['new', 'under_review', 'in_progress', 'resolved', 'rejected'];
   if (!allowedStatuses.includes(status)) return { ok: false, message: 'Invalid feedback status' };
+  const allowedCategories = ['bug', 'feature', 'payment', 'tip', 'praise', 'general'];
+  if (category !== null && !allowedCategories.includes(category)) return { ok: false, message: 'Invalid feedback category' };
   if (!pool) return { ok: false, message: 'Persistent feedback storage is unavailable' };
   try {
     const result = await pool.query(
