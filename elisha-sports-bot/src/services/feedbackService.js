@@ -8,11 +8,11 @@ const MAX_LEN = 1000;
 const RATE_WINDOW_SECONDS = 600;
 const RATE_MAX = 5;
 const categories = [
-  { cat: 'payment', re: /\\b(pay|payment|premium|upgrade|money|airtel|momo|transaction|subscription)\\b/i },
-  { cat: 'tip', re: /\\b(prediction|predict|accuracy|analysis|analyze|match model|model result)\\b/i },
-  { cat: 'feature', re: /\\b(add|feature|suggestion|improve|wish|should have|request|support .* league|coverage)\\b/i },
-  { cat: 'bug', re: /\\b(bug|broken|error|crash|not work|doesn't work|does not work|fail|glitch|issue|problem)\\b/i },
-  { cat: 'praise', re: /\\b(love|great|awesome|thank|thanks|good job|excellent|nice|helpful)\\b/i }
+  { cat: 'payment', re: /\b(pay|payment|premium|upgrade|money|airtel|momo|transaction|subscription)\b/i },
+  { cat: 'tip', re: /\b(prediction|predict|accuracy|analysis|analyze|match model|model result)\b/i },
+  { cat: 'feature', re: /\b(add|feature|suggestion|improve|wish|should have|request|support .* league|coverage)\b/i },
+  { cat: 'bug', re: /\b(bug|broken|error|crash|not work|doesn't work|does not work|fail|glitch|issue|problem)\b/i },
+  { cat: 'praise', re: /\b(love|great|awesome|thank|thanks|good job|excellent|nice|helpful)\b/i }
 ];
 
 export function detectFeedbackCategory(message) {
@@ -46,7 +46,7 @@ async function consumeFeedbackLimit(phone) {
 export async function submitFeedback({ phone, text }) {
   const body = String(text ?? '').trim();
   if (!body || body.length < MIN_LEN) {
-    return '📝 FEEDBACK\\n\\nTell us what to fix or improve (at least a short sentence).\\n\\nExamples:\\n• FEEDBACK Form command is slow for UPL teams\\n• REVIEW Please add AFCON fixtures\\n• FEEDBACK Payment confirmed but Premium not activated\\n\\nYour message goes to the developers (SMART ELISHA 256).';
+    return '📝 FEEDBACK\n\nTell us what to fix or improve (at least a short sentence).\n\nExamples:\n• FEEDBACK Form command is slow for UPL teams\n• REVIEW Please add AFCON fixtures\n• FEEDBACK Payment confirmed but Premium not activated\n\nYour message goes to the developers (SMART ELISHA 256).';
   }
   if (body.length > MAX_LEN) return `Please keep feedback under ${MAX_LEN} characters.`;
 
@@ -77,14 +77,14 @@ export async function submitFeedback({ phone, text }) {
   notifyAdmins({ id, phone, category, message: body }).catch((error) => {
     logger.warn({ error, feedbackId: id }, 'Could not notify admins of new feedback');
   });
-  return `✅ Feedback received (#${id})\\n\\nCategory: ${category}\\nThank you — the team at SMART ELISHA 256 will use this to fix and improve the bot.\\n\\nYou can send another review anytime with FEEDBACK or REVIEW.`;
+  return `✅ Feedback received (#${id})\n\nCategory: ${category}\nThank you — the team at SMART ELISHA 256 will use this to fix and improve the bot.\n\nYou can send another review anytime with FEEDBACK or REVIEW.`;
 }
 
 async function notifyAdmins({ id, phone, category, message }) {
   const phones = String(env.PAYMENT_ADMIN_PHONES || '').split(',').map((p) => p.trim().replace(/[^0-9]/g, '')).filter(Boolean);
   if (!phones.length) return;
   const snippet = message.length > 200 ? `${message.slice(0, 200)}…` : message;
-  const text = `📝 NEW FEEDBACK #${id}\\nFrom: ${phone}\\nCategory: ${category}\\nMessage:\\n${snippet}\\n\\nAdmin API: GET /admin/api/feedback`;
+  const text = `📝 NEW FEEDBACK #${id}\nFrom: ${phone}\nCategory: ${category}\nMessage:\n${snippet}\n\nAdmin API: GET /admin/api/feedback`;
   const provider = createMessagingAdapter();
   for (const to of phones) await provider.sendMessage({ to, text });
 }
