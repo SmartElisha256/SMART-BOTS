@@ -25,6 +25,18 @@ async function verifyPersistentStorage() {
       'Production database is connected but required tables are missing. Apply src/database/schema.sql before starting the bot.'
     );
   }
+
+  const paymentSchema = await pool.query(
+    "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'manual_payment_requests' AND column_name = 'network'"
+  );
+  const transactionIndex = await pool.query(
+    "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'manual_payment_requests' AND indexname = 'idx_manual_payment_transaction_id_unique'"
+  );
+  if (!paymentSchema.rows[0] || !transactionIndex.rows[0]) {
+    throw new Error(
+      'Payment database schema is outdated. Apply src/database/migrations/20261104_manual_payment_constraints.sql, then restart the bot.'
+    );
+  }
 }
 
 async function startServer() {

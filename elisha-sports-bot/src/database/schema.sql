@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS manual_payment_requests (
   phone VARCHAR(30) NOT NULL,
   transaction_id VARCHAR(120),
   amount_ugx INTEGER,
+  network VARCHAR(40) NOT NULL DEFAULT 'not-configured',
   plan_duration_days INTEGER,
   status VARCHAR(30) NOT NULL DEFAULT 'pending',
   reviewed_by VARCHAR(30),
@@ -63,6 +64,21 @@ CREATE TABLE IF NOT EXISTS manual_payment_requests (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+ALTER TABLE manual_payment_requests ADD COLUMN IF NOT EXISTS network VARCHAR(40) NOT NULL DEFAULT 'not-configured';
+DO $payment_schema$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM manual_payment_requests
+    WHERE transaction_id IS NOT NULL
+    GROUP BY transaction_id
+    HAVING COUNT(*) > 1
+  ) THEN
+    RAISE EXCEPTION
+      'Cannot enforce unique payment transaction IDs: duplicate non-null transaction_id values exist. Review duplicates before applying the payment schema.';
+  END IF;
+END
+$payment_schema$;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_manual_payment_transaction_id_unique ON manual_payment_requests(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_manual_payments_status ON manual_payment_requests(status);
 CREATE INDEX IF NOT EXISTS idx_manual_payments_phone ON manual_payment_requests(phone);
 CREATE INDEX IF NOT EXISTS idx_manual_payments_created ON manual_payment_requests(created_at DESC);
