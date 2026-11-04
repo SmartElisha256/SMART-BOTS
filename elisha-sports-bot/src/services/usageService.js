@@ -82,13 +82,13 @@ export function isQuotaTrackedMessage(message) {
   const text = String(message ?? '').trim();
   if (!text) return false;
   // Keep navigation, account, payment and support actions available at all times.
-  if (/^(menu|help|start|stop|upgrade|support|contact|admin|feedback|review|suggestion|report|payment|pay|transaction|verify|hi|hello|hey|good morning|good afternoon|good evening)(?:\\s|$)/i.test(text)) {
+  if (/^(menu|help|start|stop|upgrade|support|contact|admin|feedback|review|suggestion|report|payment|pay|transaction|verify|hi|hello|hey|good morning|good afternoon|good evening)(?:\s|$)/i.test(text)) {
     return false;
   }
   const firstWord = getCommandName(text);
   if (QUOTA_TRACKED_COMMANDS.has(firstWord)) return true;
   // Natural-language requests that clearly ask for football data still count.
-  return /\\b(football|soccer|match|matches|fixture|fixtures|live score|standings|league table|form of|recent form|head.to.head|h2h|vs\\.?|versus|upcoming games|who is playing|team statistics|player statistics|offside|tactic|tactics|formation|football rule|football rules|how is .+ doing|how are .+ doing)\\b/i.test(text);
+  return /\b(football|soccer|match|matches|fixture|fixtures|live score|standings|league table|form of|recent form|head.to.head|h2h|vs\\.?|versus|upcoming games|who is playing|team statistics|player statistics|offside|tactic|tactics|formation|football rule|football rules|how is .+ doing|how are .+ doing)\b/i.test(text);
 }
 
 export function getDailyRequestLimit(plan = 'free') {
