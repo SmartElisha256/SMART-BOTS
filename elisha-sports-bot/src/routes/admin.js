@@ -8,7 +8,7 @@ import {
 } from '../services/manualPaymentService.js';
 import { getUserSubscriptions } from '../services/subscriptionService.js';
 import { getPredictionAccuracySummary } from '../services/predictionLogService.js';
-import { listFeedback, markFeedbackReviewed } from '../services/feedbackService.js';
+import { listFeedback, getFeedbackSummary, updateFeedback } from '../services/feedbackService.js';
 import pool from '../database/pool.js';
 import { env } from '../config/env.js';
 import { getQueueStats } from '../jobs/queue.js';
@@ -201,13 +201,35 @@ adminRouter.get('/', (req, res) => {
     input { padding: 0.4rem 0.55rem; border: 1px solid #cbd5e1; border-radius: 6px; }
     .muted { color: #64748b; font-size: 0.85rem; }
     pre { white-space: pre-wrap; background: #f1f5f9; padding: 0.75rem; border-radius: 8px; font-size: 0.8rem; }
+    .feedback-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:.5rem; margin:.8rem 0; }
+    .feedback-stat,.feedback-item { border:1px solid #e2e8f0; border-radius:9px; padding:.75rem; background:#fff; }
+    .feedback-stat strong { display:block; font-size:1.35rem; }
+    .feedback-filters { display:flex; flex-wrap:wrap; gap:.5rem; margin:.75rem 0; }
+    .feedback-filters input { flex:1; min-width:180px; }
+    .feedback-item { margin:.6rem 0; }
+    .feedback-meta { color:#64748b; font-size:.8rem; margin:.35rem 0; }
+    .feedback-message { white-space:pre-wrap; overflow-wrap:anywhere; margin:.5rem 0; }
+    .feedback-actions { display:flex; flex-wrap:wrap; gap:.4rem; align-items:center; }
+    .feedback-actions select,.feedback-actions input { max-width:100%; }
+    .feedback-empty { color:#64748b; padding:1rem 0; }
   </style>
 </head>
 <body>
   <h1>ELISHA SPORTS BOT — Admin</h1>
   <p class="muted">Private dashboard. Keep the admin key secret.</p>
   <div class="card"><strong>Digest</strong><pre id="digest">Loading…</pre></div>
-  <div class="card"><strong>User feedback</strong><pre id="feedback">Loading…</pre></div>
+  <div class="card">
+    <strong>User feedback centre</strong>
+    <p class="muted">Review reports, track fixes and record decisions.</p>
+    <div id="feedbackSummary" class="feedback-stats">Loading feedback summary…</div>
+    <div class="feedback-filters">
+      <input id="feedbackSearch" placeholder="Search message, phone or ID" />
+      <select id="feedbackStatus"><option value="">All statuses</option><option value="new">New</option><option value="under_review">Under review</option><option value="in_progress">In progress</option><option value="resolved">Resolved</option><option value="rejected">Rejected</option></select>
+      <select id="feedbackCategory"><option value="">All categories</option><option value="bug">Bug</option><option value="feature">Feature</option><option value="payment">Payment</option><option value="tip">Analysis</option><option value="praise">Praise</option><option value="general">General</option></select>
+      <button type="button" id="feedbackRefresh">Refresh</button>
+    </div>
+    <div id="feedbackList" aria-live="polite">Loading…</div>
+  </div>
   <div class="card"><strong>Status</strong><pre id="status">Loading…</pre></div>
   <div class="card"><strong>Pending payments</strong><div id="payments">Loading…</div></div>
   <div class="card">
@@ -239,7 +261,62 @@ async function loadDigest() {
   const fb = document.getElementById('feedback');
   if (fb) fb.textContent = JSON.stringify((await api('/admin/api/feedback?limit=20')).rows || [], null, 2);
 }
-async function loadStatus() {
+
+function addText(parent, tag, value, className) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  node.textContent = value == null ? '' : String(value);
+  parent.appendChild(node);
+  return node;
+}
+async function loadFeedback() {
+  const params = new URLSearchParams({limit:'100'});
+  const status = document.getElementById('feedbackStatus').value;
+  const category = document.getElementById('feedbackCategory').value;
+  const search = document.getElementById('feedbackSearch').value.trim();
+  if (status) params.set('status', status);
+  if (category) params.set('category', category);
+  if (search) params.set('search', search);
+  const data = await api('/admin/api/feedback?' + params.toString());
+  const summary = data.summary || {};
+  const byStatus = summary.byStatus || {};
+  const stats = document.getElementById('feedbackSummary');
+  stats.replaceChildren();
+  [['Total',summary.total],['New',byStatus.new],['Under review',byStatus.under_review],['In progress',byStatus.in_progress],['Resolved',byStatus.resolved],['Rejected',byStatus.rejected]].forEach(([label,value]) => {
+    const card = document.createElement('div'); card.className='feedback-stat';
+    addText(card,'strong',value ?? 0); addText(card,'span',label); stats.appendChild(card);
+  });
+  const list = document.getElementById('feedbackList'); list.replaceChildren();
+  if (!data.rows?.length) { addText(list,'p','No feedback matches these filters.','feedback-empty'); return; }
+  data.rows.forEach(row => {
+    const card = document.createElement('article'); card.className='feedback-item';
+    const heading = document.createElement('div'); heading.className='feedback-actions';
+    addText(heading,'strong','#' + row.id + ' · ' + (row.category || 'general'));
+    addText(heading,'span',row.status,'feedback-meta');
+    card.appendChild(heading);
+    addText(card,'div',(row.phone || 'Unknown phone') + ' · ' + new Date(row.created_at).toLocaleString(),'feedback-meta');
+    addText(card,'p',row.message,'feedback-message');
+    if (row.admin_notes) addText(card,'p','Admin notes: ' + row.admin_notes,'feedback-meta');
+    const actions = document.createElement('div'); actions.className='feedback-actions';
+    const statusSelect = document.createElement('select');
+    [['new','New'],['under_review','Under review'],['in_progress','In progress'],['resolved','Resolved'],['rejected','Rejected']].forEach(([v,l]) => { const o=document.createElement('option'); o.value=v; o.textContent=l; statusSelect.appendChild(o); });
+    statusSelect.value = row.status;
+    const categorySelect = document.createElement('select');
+    ['bug','feature','payment','tip','praise','general'].forEach(v => { const o=document.createElement('option'); o.value=v; o.textContent=v; categorySelect.appendChild(o); });
+    categorySelect.value = row.category || 'general';
+    const notes = document.createElement('input'); notes.placeholder='Admin note / resolution'; notes.value=row.admin_notes || '';
+    const save = document.createElement('button'); save.className='ok'; save.textContent='Save update';
+    save.onclick = async () => {
+      save.disabled=true;
+      try {
+        const result=await api('/admin/api/feedback/'+encodeURIComponent(row.id),{method:'PATCH',body:JSON.stringify({status:statusSelect.value,category:categorySelect.value,notes:notes.value})});
+        alert(result.message || 'Feedback updated'); await loadFeedback();
+      } catch(error) { alert(error.message); } finally { save.disabled=false; }
+    };
+    actions.append(statusSelect,categorySelect,notes,save); card.appendChild(actions); list.appendChild(card);
+  });
+}
+\nasync function loadStatus() {
   document.getElementById('status').textContent = JSON.stringify(await api('/admin/api/status'), null, 2);
 }
 async function loadPayments() {
