@@ -97,7 +97,7 @@ export async function handleIncomingWebhook(req, res) {
       let paymentNotification = null;
       const adminControlCommand = /^(approve|reject|setplan|changeplan|pending|pendingpayments|payments)(?:\s|$)/i.test(message.text);
 
-      if (!['text', 'audio', 'image'].includes(message.type)) {\n        reply = 'I received your message, but I can currently understand text, images, and voice notes only. Please type your request as text. Send HELP to see examples.';\n        await provider.sendMessage({ to: message.sender, text: reply });\n        try { await recordOutgoingMessage(message.sender); } catch (usageError) {\n          logger.warn({ error: usageError, phone: message.sender }, 'Could not record outgoing message usage');\n        }\n        await markMessageProcessed(message.id);\n        continue;\n      }\n\n      if (message.type !== 'text' && message.type !== 'audio' && message.type !== 'image') {
+      if (message.type !== 'text' && message.type !== 'audio' && message.type !== 'image') {
         reply = 'I received your message, but I can currently understand text, images, and voice notes only. Please type your request as text. Send HELP to see examples.';
         await provider.sendMessage({ to: message.sender, text: reply });
         try { await recordOutgoingMessage(message.sender); } catch (usageError) {
