@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS manual_payment_requests (
   phone VARCHAR(30) NOT NULL,
   transaction_id VARCHAR(120),
   amount_ugx INTEGER,
+  network VARCHAR(40) NOT NULL DEFAULT 'not-configured',
   plan_duration_days INTEGER,
   status VARCHAR(30) NOT NULL DEFAULT 'pending',
   reviewed_by VARCHAR(30),
@@ -63,6 +64,8 @@ CREATE TABLE IF NOT EXISTS manual_payment_requests (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+ALTER TABLE manual_payment_requests ADD COLUMN IF NOT EXISTS network VARCHAR(40) NOT NULL DEFAULT 'not-configured';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_manual_payment_transaction_id_unique ON manual_payment_requests(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_manual_payments_status ON manual_payment_requests(status);
 CREATE INDEX IF NOT EXISTS idx_manual_payments_phone ON manual_payment_requests(phone);
 CREATE INDEX IF NOT EXISTS idx_manual_payments_created ON manual_payment_requests(created_at DESC);
