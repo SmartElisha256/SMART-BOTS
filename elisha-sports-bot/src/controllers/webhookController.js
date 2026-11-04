@@ -68,6 +68,14 @@ export async function handleIncomingWebhook(req, res) {
       for (const message of change.value?.messages ?? []) {
         if (!message.from) continue;
         const messageId = message.id ? String(message.id) : null;
+        let normalized = null;
+        if (typeof message.text?.body === 'string' && message.text.body.trim()) {
+          normalized = { id: messageId, sender: message.from, text: message.text.body.trim(), type: 'text' };
+        } else if (message.type === 'audio' || message.type === 'image') {
+          normalized = { id: messageId, sender: message.from, text: '', type: message.type };
+        }
+        // Ignore unsupported message types without creating a processing lease.
+        if (!normalized) continue;
         if (messageId) {
           const claim = await claimMessage(messageId);
           if (!claim.claimed) {
@@ -75,21 +83,7 @@ export async function handleIncomingWebhook(req, res) {
             continue;
           }
         }
-        if (typeof message.text?.body === 'string' && message.text.body.trim()) {
-          messages.push({
-            id: messageId,
-            sender: message.from,
-            text: message.text.body.trim(),
-            type: 'text'
-          });
-        } else if (message.type === 'audio' || message.type === 'image') {
-          messages.push({
-            id: messageId,
-            sender: message.from,
-            text: '',
-            type: message.type
-          });
-        }
+        messages.push(normalized);
       }
     }
   }
