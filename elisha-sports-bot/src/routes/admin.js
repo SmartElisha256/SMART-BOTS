@@ -5,9 +5,7 @@ import {
   approvePayment,
   rejectPayment,
   setPaymentPlan,
-  getPaymentRequestByReference
 } from '../services/manualPaymentService.js';
-import { afterPaymentApproved, afterPaymentRejected } from '../services/paymentNotifyHook.js';
 import { getUserSubscriptions } from '../services/subscriptionService.js';
 import { getPredictionAccuracySummary } from '../services/predictionLogService.js';
 import { listFeedback, markFeedbackReviewed } from '../services/feedbackService.js';
@@ -109,22 +107,15 @@ adminRouter.post('/api/payments/:id/approve', async (req, res) => {
     paymentReference: req.params.id
   });
   const ok = !message.startsWith('⛔') && !message.startsWith('No pending');
-  if (ok) {
-    await afterPaymentApproved(req.params.id).catch(() => {});
-  }
   res.json({ ok, message });
 });
 
 adminRouter.post('/api/payments/:id/reject', async (req, res) => {
-  const before = await getPaymentRequestByReference(req.params.id);
   const message = await rejectPayment({
     adminPhone: adminPhone(),
     paymentReference: req.params.id
   });
   const ok = !message.startsWith('⛔') && !message.startsWith('No pending');
-  if (ok && before) {
-    await afterPaymentRejected(req.params.id).catch(() => {});
-  }
   res.json({ ok, message });
 });
 
@@ -191,7 +182,6 @@ adminRouter.get('/api/audit', async (req, res) => {
 });
 
 adminRouter.get('/', (req, res) => {
-  const key = String(req.query.key || '');
   res.type('html').send(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -230,12 +220,18 @@ adminRouter.get('/', (req, res) => {
   </div>
   <div class="card"><strong>Recent audit log</strong><pre id="audit">Loading…</pre></div>
 <script>
-const KEY = ${JSON.stringify(key)};
+let KEY = sessionStorage.getItem('elisha_admin_key') || '';
 async function api(path, opts = {}) {
-  const res = await fetch(path + (path.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(KEY), {
+  if (!KEY) {
+    KEY = window.prompt('Enter the ELISHA admin API key:') || '';
+    if (!KEY) throw new Error('Admin key required');
+    sessionStorage.setItem('elisha_admin_key', KEY);
+  }
+  const res = await fetch(path, {
     ...opts,
     headers: { 'Content-Type': 'application/json', 'x-admin-key': KEY, ...(opts.headers || {}) }
   });
+  if (res.status === 401) { sessionStorage.removeItem('elisha_admin_key'); KEY = ''; throw new Error('Unauthorized. Reload and sign in again.'); }
   return res.json();
 }
 async function loadDigest() {
