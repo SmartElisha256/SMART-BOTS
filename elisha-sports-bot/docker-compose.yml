@@ -15,6 +15,20 @@ services:
         condition: service_healthy
     command: npm run start
 
+  worker:
+    build: .
+    container_name: elisha-sports-bot-worker
+    init: true
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: npm run worker
+
   postgres:
     image: postgres:16-alpine
     container_name: elisha-sports-bot-db
