@@ -1,16 +1,18 @@
 {
   "output": "epl_historical.csv",
-  "match_count": 1900,
+  "match_count": 2380,
   "date_from": "2020-09-12",
-  "date_to": "2025-05-25",
+  "date_to": "2026-11-08",
   "season_files": [
     "epl_2020_21.csv",
     "epl_2021_22.csv",
     "epl_2022_23.csv",
     "epl_2023_24.csv",
-    "epl_2024_25.csv"
+    "epl_2024_25.csv",
+    "epl_2025_26.csv",
+    "epl_2026_27.csv"
   ],
   "provider_merged": false,
-  "updated_at_utc": "2026-11-02T14:20:25.753370+00:00",
+  "updated_at_utc": "2026-11-13T15:23:56.869120+00:00",
   "note": "Not automatically current for unfinished seasons; retrain after adding new CSVs."
 }
