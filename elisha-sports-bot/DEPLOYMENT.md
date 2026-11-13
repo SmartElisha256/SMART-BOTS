@@ -63,7 +63,27 @@ npm run test:messaging
 
 ### Environment Variables
 
-All environment variables are documented in `.env.example`. Configure the database, Redis, environment, port, and credentials required by the integrations you enable. Production configuration is validated at startup.
+All required environment variables are documented in `.env.example`. Set these before startup:
+
+**Required:**
+- `DATABASE_URL` - PostgreSQL connection string
+- `REDIS_URL` - connection string for a persistent Redis service; required in production
+- `NODE_ENV=production`
+- `PORT` - HTTP server port (default 3000)
+
+For Replit published deployments, add `REDIS_URL` through Replit Secrets and
+use a managed Redis service with persistence enabled. Do not use the
+`start-replit.sh` local Redis for a published deployment: its filesystem can be
+reset. The app also uses this Redis connection for caching and background jobs.
+The `rediss://` scheme can be used when the provider requires TLS. Never commit
+the connection string or place it in `.env.example`.
+
+**Optional (for integrations):**
+- `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN`
+- `CALLMEBOT_API_KEY`, `CALLMEBOT_PHONE`
+- `SPORTS_API_BASE_URL`, `SPORTS_API_KEY`
+
+Production configuration is validated at startup.
 
 ### Database Initialization
 
