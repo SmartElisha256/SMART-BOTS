@@ -1,16 +1,20 @@
-"""Generate consistent pre-match probabilities from trained artifacts and history."""
+"""Generate pre-match estimates from trained models and historical match data."""
 from __future__ import annotations
 
 import argparse
 import json
 import math
 import sys
-from collections import defaultdict, deque
 from pathlib import Path
 
 import joblib
 import numpy as np
-from features import FEATURES, load_matches, team_form, _features_for
+import pandas as pd
+
+from features import FEATURES, features_for_fixture, load_matches, team_form
+from markets import markets_from_score_matrix, market_rows_for_display, build_poisson_score_matrix
+from dixon_coles import build_dixon_coles_score_matrix
+from calibration import apply_multiclass_isotonic
 
 
 def poisson_pmf(k: int, rate: float) -> float:
@@ -23,6 +27,20 @@ def _normalise(values: dict[str, float]) -> dict[str, float]:
     if total <= 0:
         raise ValueError("Could not calculate a valid probability distribution.")
     return {key: max(0.0, value) / total for key, value in values.items()}
+
+
+def _confidence_level(top_prob: float, historical_matches: int, is_synthetic: bool) -> str:
+    if is_synthetic:
+        return "very_low"
+    if historical_matches < 50:
+        return "low"
+    if top_prob >= 0.55 and historical_matches >= 200:
+        return "high"
+    if top_prob >= 0.48 and historical_matches >= 100:
+        return "medium"
+    if top_prob >= 0.42:
+        return "limited"
+    return "low"
 
 
 def predict(payload: dict, data_path="data/epl_historical.csv", models_dir="models") -> dict:
@@ -39,117 +57,189 @@ def predict(payload: dict, data_path="data/epl_historical.csv", models_dir="mode
     kickoff = payload.get("kickoff")
     if kickoff is not None and not isinstance(kickoff, str):
         raise ValueError("kickoff must be an ISO date/time string or null.")
-    try:
-        cutoff = np.datetime64(kickoff.replace("Z", "")) if kickoff else None
-    except Exception as exc:
-        raise ValueError("kickoff must be a valid ISO date/time.") from exc
+    if kickoff is not None:
+        try:
+            parsed_kickoff = pd.to_datetime(kickoff, utc=True, errors="raise")
+            if pd.isna(parsed_kickoff):
+                raise ValueError("kickoff is not a valid timestamp")
+            kickoff = parsed_kickoff.isoformat()
+        except Exception as exc:
+            raise ValueError("kickoff must be a valid ISO date/time timestamp.") from exc
 
     raw = load_matches(data_path)
-    if cutoff is not None:
-        raw = raw[raw["match_date"].dt.tz_convert(None) < cutoff]
-    if len(raw) < 20:
-        raise ValueError("At least 20 historical matches before kickoff are required.")
-
     models = Path(models_dir)
     needed = [models / "result.joblib", models / "home_goals.joblib", models / "away_goals.joblib"]
     if not all(path.exists() for path in needed):
         raise FileNotFoundError(
             "Models are not trained. Run prepare_epl_data.py, then train.py --data data/epl_historical.csv"
         )
+
     result_artifact = joblib.load(needed[0])
-    home_model, away_model = joblib.load(needed[1]), joblib.load(needed[2])
-    if cutoff is not None and result_artifact.get("trained_until"):
-        model_cutoff = np.datetime64(str(result_artifact["trained_until"]).replace("Z", ""))
-        if cutoff <= model_cutoff:
-            raise ValueError(
-                "Model artifacts include matches on or after the requested kickoff. "
-                "Retrain using history strictly before that kickoff for historical backtesting."
-            )
-
-    history = defaultdict(lambda: deque(maxlen=5))
-    for row in raw.sort_values("match_date").itertuples(index=False):
-        hg, ag = int(row.home_goals), int(row.away_goals)
-        history[row.home_team].append((hg, ag, 3 if hg > ag else (1 if hg == ag else 0)))
-        history[row.away_team].append((ag, hg, 3 if ag > hg else (1 if ag == hg else 0)))
-    feats = _features_for(home, away, history)
-    X = [[float(feats[name]) for name in FEATURES]]
-
-    # Keep the classifier output visible for comparison, but derive the primary
-    # 1X2 markets from the same score distribution used for scorelines and goals.
+    home_model = joblib.load(needed[1])
+    away_model = joblib.load(needed[2])
     classifier = result_artifact["model"]
-    encoded = classifier.predict_proba(X)[0]
-    labels = result_artifact["encoder"].inverse_transform(classifier.classes_)
-    ml_probs = _normalise({str(label): float(prob) for label, prob in zip(labels, encoded)})
-    ml_result = {"home_win": ml_probs.get("H", 0.0), "draw": ml_probs.get("D", 0.0), "away_win": ml_probs.get("A", 0.0)}
-    ml_result = _normalise(ml_result)
+    encoder = result_artifact["encoder"]
+    feature_names = list(result_artifact.get("features") or FEATURES)
 
-    home_xg = max(0.05, min(6.0, float(home_model.predict(X)[0])))
-    away_xg = max(0.05, min(6.0, float(away_model.predict(X)[0])))
-    # Use a wide score grid so 1X2, double chance and correct-score estimates
-    # come from one internally consistent independent-Poisson distribution.
-    home_pmf = [poisson_pmf(k, home_xg) for k in range(21)]
-    away_pmf = [poisson_pmf(k, away_xg) for k in range(21)]
-    scores = []
-    outcomes = {"home_win": 0.0, "draw": 0.0, "away_win": 0.0}
-    for hg, hp in enumerate(home_pmf):
-        for ag, ap in enumerate(away_pmf):
-            probability = hp * ap
-            if hg > ag:
-                outcomes["home_win"] += probability
-            elif hg == ag:
-                outcomes["draw"] += probability
-            else:
-                outcomes["away_win"] += probability
-            if hg <= 10 and ag <= 10:
-                scores.append({"score": f"{hg}-{ag}", "probability": probability})
-    result_probs = _normalise(outcomes)
-    scores.sort(key=lambda item: item["probability"], reverse=True)
+    feat = features_for_fixture(raw, home, away, kickoff=kickoff)
+    if feat.get("home_matches_seen", 0) == 0 or feat.get("away_matches_seen", 0) == 0:
+        missing_teams = []
+        if feat.get("home_matches_seen", 0) == 0:
+            missing_teams.append(home)
+        if feat.get("away_matches_seen", 0) == 0:
+            missing_teams.append(away)
+        return {
+            "prediction_available": False,
+            "unavailable_reason": "Insufficient pre-kickoff history for: " + ", ".join(missing_teams),
+            "fixture": {"home_team": home, "away_team": away, "competition": payload.get("competition"), "kickoff": kickoff},
+            "data_quality": {
+                "status": "unavailable",
+                "historical_matches": int(len(raw)),
+                "history_date_range": {"from": str(raw["match_date"].min().date()), "to": str(raw["match_date"].max().date())},
+                "warnings": ["No completed pre-kickoff matches found for one or both team names; predictions were not generated."],
+            },
+        }
+    X = pd.DataFrame([{name: float(feat.get(name, 0.0)) for name in feature_names}])[feature_names]
 
-    goal_lines = {}
-    total_xg = home_xg + away_xg
-    for line in (0.5, 1.5, 2.5, 3.5):
-        under = sum(poisson_pmf(k, total_xg) for k in range(int(line) + 1))
-        under = max(0.0, min(1.0, under))
-        goal_lines[f"over_{str(line).replace('.', '_')}"] = 1.0 - under
-        goal_lines[f"under_{str(line).replace('.', '_')}"] = under
-    btts_yes = (1.0 - math.exp(-home_xg)) * (1.0 - math.exp(-away_xg))
-    is_synthetic = bool(
-        result_artifact.get("synthetic_data", False)
-        or ("source" in raw and (raw["source"] == "synthetic").all())
+    proba = classifier.predict_proba(X)
+    calibrators = result_artifact.get("isotonic_calibrators")
+    ml_calibrated = False
+    if calibrators:
+        proba = apply_multiclass_isotonic(proba, calibrators)
+        ml_calibrated = True
+    proba = proba[0]
+    classes = list(encoder.classes_)
+    class_probs = {cls: float(p) for cls, p in zip(classes, proba)}
+    ml_result = _normalise({
+        "home_win": class_probs.get("H", 0.0),
+        "draw": class_probs.get("D", 0.0),
+        "away_win": class_probs.get("A", 0.0),
+    })
+    ml_result["predicted_label"] = max(
+        ("home_win", "draw", "away_win"), key=lambda k: ml_result[k]
     )
-    warnings = [
-        "Synthetic sample data is not evidence of real-world accuracy." if is_synthetic
-        else "Model has not been independently validated on live competition data.",
-        "The primary 1X2 markets are derived from the Poisson score model; machine_learning_result is shown separately for comparison.",
-        "Predictions are estimates, not guarantees.",
-    ]
+    ml_result["calibrated"] = ml_calibrated
+
+    home_xg = float(max(0.05, min(5.0, home_model.predict(X)[0])))
+    away_xg = float(max(0.05, min(5.0, away_model.predict(X)[0])))
+
+    rho = 0.0
+    rho_warning = None
+    rho_path = models / "dixon_coles.json"
+    if rho_path.exists():
+        try:
+            rho_payload = json.loads(rho_path.read_text())
+            rho = float(rho_payload.get("rho", 0.0))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            rho_warning = "Dixon–Coles rho file could not be read; independent Poisson was used."
+            rho = 0.0
+    if abs(rho) < 1e-12:
+        score_matrix, grid_meta = build_poisson_score_matrix(home_xg, away_xg)
+    else:
+        score_matrix, grid_meta = build_dixon_coles_score_matrix(home_xg, away_xg, rho)
+    max_goals = int(grid_meta["max_goals_per_team"])
+
+    markets = markets_from_score_matrix(
+        score_matrix, home_xg, away_xg, max_goals=max_goals, grid_meta=grid_meta
+    )
+    result_probs = markets["match_result"]
+    scores = markets["correct_score"]
+    goal_lines = markets["goal_markets"]
+
+    is_synthetic = bool(result_artifact.get("synthetic_data"))
+    warnings = []
+    if rho_warning:
+        warnings.append(rho_warning)
+    if kickoff:
+        try:
+            ko = pd.to_datetime(kickoff, utc=True)
+            if ko < pd.Timestamp.now(tz="UTC") - pd.Timedelta(hours=3):
+                warnings.append(
+                    "Kickoff is in the past relative to server time; this is a historical-style "
+                    "estimate using only features available before that kickoff, not a live forecast."
+                )
+        except Exception:
+            warnings.append("Kickoff timestamp could not be parsed; treat timing context as uncertain.")
+    if is_synthetic:
+        warnings.append("Model was trained on synthetic data.")
+    if feat.get("home_matches_seen", 0) < 3 or feat.get("away_matches_seen", 0) < 3:
+        warnings.append("Limited form history for one or both teams.")
+    if feat.get("h2h_matches", 0) < 1:
+        warnings.append("No head-to-head meetings in the training history window.")
+    as_of = pd.to_datetime(kickoff, utc=True) if kickoff else pd.Timestamp.now(tz="UTC")
+    prior_dates = raw.loc[raw["match_date"] < as_of, "match_date"]
+    latest_prior = prior_dates.max() if not prior_dates.empty else None
+    data_age_days = int((as_of - latest_prior).total_seconds() // 86400) if latest_prior is not None else None
+    if data_age_days is None or data_age_days > 90:
+        warnings.append("Historical dataset is stale for this prediction cutoff; verify newer licensed results before relying on estimates.")
+    if grid_meta.get("warning"):
+        warnings.append(grid_meta["warning"])
+
+    top_prob = max(result_probs.values())
+    conf_level = _confidence_level(top_prob, len(raw), is_synthetic)
+
     return {
-        "fixture": {"home_team": home, "away_team": away, "competition": payload.get("competition"), "kickoff": kickoff},
+        "prediction_available": True,
+        "fixture": {
+            "home_team": home,
+            "away_team": away,
+            "competition": payload.get("competition"),
+            "kickoff": kickoff,
+        },
         "data_quality": {
-            "status": "synthetic" if is_synthetic else ("limited" if len(raw) < 100 else "unvalidated"),
-            "historical_matches": int(len(raw)), "warnings": warnings,
+            "status": "synthetic" if is_synthetic else ("stale" if data_age_days is None or data_age_days > 90 else ("ok" if len(raw) >= 200 else "limited")),
+            "historical_matches": int(len(raw)),
+            "last_match_date": str(raw["match_date"].max().date()),
+            "data_age_days_at_cutoff": data_age_days,
+            "history_date_range": {
+                "from": str(raw["match_date"].min().date()),
+                "to": str(raw["match_date"].max().date()),
+            },
+            "warnings": warnings,
+        },
+        "features_used": {
+            "model_features": feature_names,
+            "rolling_window_matches": 5,
+            "player_data_in_model": False,
+            "includes_elo": True,
+            "includes_h2h": True,
+            "includes_venue_form": True,
         },
         "match_result": result_probs,
         "machine_learning_result": ml_result,
-        "double_chance": {
-            "1X": result_probs["home_win"] + result_probs["draw"],
-            "X2": result_probs["draw"] + result_probs["away_win"],
-            "12": result_probs["home_win"] + result_probs["away_win"],
-        },
+        "double_chance": markets["double_chance"],
+        "draw_no_bet": markets["draw_no_bet"],
         "goal_markets": goal_lines,
-        "btts": {"yes": float(btts_yes), "no": float(1.0 - btts_yes)},
-        "expected_goals": {"home": home_xg, "away": away_xg},
-        "correct_score": scores[:5],
-        "team_form": {"home": team_form(raw, home, as_of=kickoff), "away": team_form(raw, away, as_of=kickoff)},
+        "home_team_goals": markets["home_team_goals"],
+        "away_team_goals": markets["away_team_goals"],
+        "goal_ranges": markets["goal_ranges"],
+        "btts": markets["btts"],
+        "team_scoring": markets["team_scoring"],
+        "expected_goals": markets["expected_goals"],
+        "correct_score": scores[:8],
+        "correct_score_note": markets.get("correct_score_note"),
+        "half_time": markets["half_time"],
+        "first_team_to_score": markets["first_team_to_score"],
+        "market_rows": market_rows_for_display(markets),
+        "markets_meta": {**markets["meta"], "poisson_grid": grid_meta},
+        "team_form": {
+            "home": team_form(raw, home, as_of=kickoff),
+            "away": team_form(raw, away, as_of=kickoff),
+        },
         "confidence": {
-            "level": "unvalidated" if is_synthetic or len(raw) < 100 else "limited",
-            "top_result_probability": max(result_probs.values()),
-            "warnings": ["Confidence labels are conservative and are not calibrated performance guarantees."],
+            "level": conf_level,
+            "top_result_probability": top_prob,
+            "warnings": [
+                "Confidence labels are conservative and are not calibrated performance guarantees."
+            ],
         },
         "model": {
-            "version": "baseline-random-forest-poisson-consistent-v3",
+            "version": result_artifact.get("model_version", "hgb-elo-h2h-venue-v5"),
+            "name": result_artifact.get("model_version", "hgb-elo-h2h-venue-v5"),
             "trained_until": result_artifact.get("trained_until", str(raw["match_date"].max())),
-            "evaluation_summary": (models / "evaluation.json").read_text() if (models / "evaluation.json").exists() else None,
+            "evaluation_summary": (models / "evaluation.json").read_text()
+            if (models / "evaluation.json").exists()
+            else None,
         },
     }
 
@@ -164,9 +254,11 @@ def main():
     parser.add_argument("--kickoff")
     args = parser.parse_args()
     try:
-        payload = json.load(sys.stdin) if args.request_stdin else {
-            "home_team": args.home_team, "away_team": args.away_team, "kickoff": args.kickoff
-        }
+        payload = (
+            json.load(sys.stdin)
+            if args.request_stdin
+            else {"home_team": args.home_team, "away_team": args.away_team, "kickoff": args.kickoff}
+        )
         print(json.dumps(predict(payload, args.data, args.models_dir), allow_nan=False))
     except Exception as exc:
         print(json.dumps({"error": str(exc)}))

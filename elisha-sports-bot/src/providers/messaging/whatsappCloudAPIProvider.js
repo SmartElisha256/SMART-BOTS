@@ -8,9 +8,15 @@ const whatsappConfigSchema = z.object({
   accessToken: z.string().min(1),
   appSecret: z.string().optional(),
   apiVersion: z.string().default('v19.0'),
-  apiBaseUrl: z.string().url().default('https://graph.instagram.com'),
+  apiBaseUrl: z.string().url().default('https://graph.facebook.com'),
   webhookVerifyToken: z.string().min(1)
 });
+
+function safeEqualText(left, right) {
+  const a = Buffer.from(String(left ?? ''));
+  const b = Buffer.from(String(right ?? ''));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 
 export class WhatsAppCloudAPIProvider {
   constructor(config = {}) {
@@ -34,32 +40,36 @@ export class WhatsAppCloudAPIProvider {
   }
 
   verifyWebhookToken(token) {
-    return token === this.webhookVerifyToken;
+    return safeEqualText(token, this.webhookVerifyToken);
   }
 
   verifyWebhookSignature(payload, xHubSignature) {
-    if (!this.appSecret) {
-      logger.warn('App secret not configured. Webhook signature verification skipped.');
+    if (!this.appSecret || this.appSecret === 'replace-me') {
+      if (env.NODE_ENV === 'production') {
+        logger.error('App secret not configured in production. Webhook signature verification failed.');
+        return false;
+      }
+      logger.warn('App secret not configured. Webhook signature verification skipped (non-production only).');
       return true;
     }
 
     if (!xHubSignature) {
-      logger.warn('Missing X-Hub-Signature header');
+      logger.warn('Missing X-Hub-Signature-256 header');
       return false;
     }
 
-    const hash = crypto.createHmac('sha256', this.appSecret).update(payload).digest('hex');
+    const body = typeof payload === 'string' || Buffer.isBuffer(payload)
+      ? payload
+      : JSON.stringify(payload);
+    const hash = crypto.createHmac('sha256', this.appSecret).update(body).digest('hex');
     const expected = `sha256=${hash}`;
 
-    const isValid = crypto.timingSafeEqual(
-      Buffer.from(expected),
-      Buffer.from(xHubSignature)
-    );
-
-    return isValid;
+    // Length-safe compare avoids timingSafeEqual throwing on mismatched lengths.
+    return safeEqualText(expected, xHubSignature);
   }
 
   isDuplicateMessage(messageId, ttlMs = 3600_000) {
+    if (!messageId) return false;
     if (this.processedMessageIds.has(messageId)) {
       return true;
     }

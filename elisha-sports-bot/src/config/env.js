@@ -18,10 +18,7 @@ const envSchema = z.object({
   WHATSAPP_API_BASE_URL: z.string().url().default('https://graph.facebook.com/v19.0'),
   WHATSAPP_APP_SECRET: z.string().optional().default(''),
   WHATSAPP_API_VERSION: z.string().default('v19.0'),
-  CALLMEBOT_API_KEY: z.string().default('replace-me'),
-  CALLMEBOT_PHONE: z.string().default('replace-me'),
-  CALLMEBOT_ENDPOINT: z.string().url().default('https://api.callmebot.com/whatsapp.php'),
-  MESSAGING_PROVIDER: z.enum(['mock', 'callmebot', 'whatsapp-cloud']).default('mock'),
+  MESSAGING_PROVIDER: z.enum(['mock', 'whatsapp-cloud']).default('mock'),
   SPORTS_DATA_PROVIDER: z.enum(['mock', 'api-football']).default('mock'),
   SPORTS_API_BASE_URL: z.string().url().default('https://v3.football.api-sports.io'),
   SPORTS_API_KEY: z.string().optional().default(''),
@@ -39,9 +36,8 @@ const envSchema = z.object({
   RATE_LIMIT_POINTS: z.coerce.number().int().positive().default(30),
   RATE_LIMIT_DURATION: z.coerce.number().int().positive().default(60),
   FREE_DAILY_REQUEST_LIMIT: z.coerce.number().int().positive().default(20),
-  PREMIUM_DAILY_REQUEST_LIMIT: z.coerce.number().int().positive().default(10),
+  PREMIUM_DAILY_REQUEST_LIMIT: z.coerce.number().int().positive().default(200),
   PREMIUM_MONTHLY_REQUEST_LIMIT: z.coerce.number().int().positive().default(300),
-  // Manual payments only; no payment gateway or automatic debit is used.
   PREMIUM_PRICE_UGX: z.coerce.number().int().nonnegative().default(5000),
   PREMIUM_PRICE_DAY_UGX: z.coerce.number().int().positive().default(1000),
   PREMIUM_PRICE_WEEK_UGX: z.coerce.number().int().positive().default(5000),
@@ -49,19 +45,40 @@ const envSchema = z.object({
   MOMO_NETWORK: z.string().default(''),
   MOMO_MERCHANT_CODE: z.string().default('SET_YOUR_MERCHANT_CODE'),
   MOMO_MERCHANT_NAME: z.string().default(''),
-  PAYMENT_ADMIN_PHONES: z.string().default('')
+  PAYMENT_ADMIN_PHONES: z.string().default(''),
+  ADMIN_API_KEY: z.string().default('replace-me')
 });
 
 export const env = envSchema.parse(process.env);
-
 export const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-export function validateEnvironment() {
-  const requiredVars = ['DATABASE_URL', 'REDIS_URL'];
-  const missing = requiredVars.filter((key) => !process.env[key]);
+function isPlaceholder(value) {
+  const v = String(value ?? '').trim();
+  return !v || v === 'replace-me' || v === 'SET_YOUR_MERCHANT_CODE' || v === 'change-me';
+}
 
-  if (missing.length > 0) {
-    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+export function validateEnvironment() {
+  const issues = [];
+
+  if (!process.env.DATABASE_URL) issues.push('DATABASE_URL');
+  if (!process.env.REDIS_URL) issues.push('REDIS_URL');
+
+  if (env.NODE_ENV === 'production') {
+    if (env.MESSAGING_PROVIDER !== 'whatsapp-cloud') issues.push('MESSAGING_PROVIDER must be whatsapp-cloud in production');
+    if (env.SPORTS_DATA_PROVIDER !== 'api-football') issues.push('SPORTS_DATA_PROVIDER must be api-football in production');
+    if (isPlaceholder(env.WHATSAPP_TOKEN)) issues.push('WHATSAPP_TOKEN');
+    if (isPlaceholder(env.WHATSAPP_PHONE_NUMBER_ID)) issues.push('WHATSAPP_PHONE_NUMBER_ID');
+    if (isPlaceholder(env.WHATSAPP_WEBHOOK_VERIFY_TOKEN)) issues.push('WHATSAPP_WEBHOOK_VERIFY_TOKEN');
+    if (isPlaceholder(env.WHATSAPP_APP_SECRET)) issues.push('WHATSAPP_APP_SECRET');
+    if (isPlaceholder(env.DATABASE_URL) || env.DATABASE_URL.includes('change-me')) issues.push('DATABASE_URL');
+    if (isPlaceholder(env.MOMO_MERCHANT_CODE) || isPlaceholder(env.MOMO_MERCHANT_NAME) || !env.MOMO_NETWORK) issues.push('MOMO_NETWORK / MOMO_MERCHANT_CODE / MOMO_MERCHANT_NAME');
+    if (!String(env.PAYMENT_ADMIN_PHONES || '').trim()) issues.push('PAYMENT_ADMIN_PHONES');
+    if (!env.ADMIN_API_KEY || isPlaceholder(env.ADMIN_API_KEY)) issues.push('ADMIN_API_KEY');
+    if (!env.OPENAI_API_KEY) issues.push('OPENAI_API_KEY');
+  }
+
+  if (issues.length) {
+    throw new Error('Production configuration incomplete. Replace placeholders for: ' + issues.join(', '));
   }
 
   return {
@@ -75,6 +92,7 @@ export function validateEnvironment() {
     sportsDataProvider: env.SPORTS_DATA_PROVIDER,
     sportsApiConfigured: Boolean(env.SPORTS_API_KEY),
     aiAnalysisConfigured: Boolean(env.OPENAI_API_KEY),
+    adminDashboardConfigured: !isPlaceholder(env.ADMIN_API_KEY),
     dailyRequestLimits: {
       free: env.FREE_DAILY_REQUEST_LIMIT,
       premium: env.PREMIUM_DAILY_REQUEST_LIMIT,

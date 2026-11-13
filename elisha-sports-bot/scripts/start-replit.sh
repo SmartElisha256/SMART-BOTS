@@ -3,11 +3,16 @@ set -euo pipefail
 
 redis_pid=
 app_pid=
+worker_pid=
 
 cleanup() {
   if [[ -n "${app_pid}" ]] && kill -0 "${app_pid}" 2>/dev/null; then
     kill "${app_pid}" 2>/dev/null || true
     wait "${app_pid}" 2>/dev/null || true
+  fi
+  if [[ -n "${worker_pid}" ]] && kill -0 "${worker_pid}" 2>/dev/null; then
+    kill "${worker_pid}" 2>/dev/null || true
+    wait "${worker_pid}" 2>/dev/null || true
   fi
   if [[ -n "${redis_pid}" ]]; then
     kill "${redis_pid}" 2>/dev/null || true
@@ -51,4 +56,8 @@ NODE_ENV=development \
 PORT=5000 \
 npm run dev &
 app_pid=$!
-wait "${app_pid}"
+
+NODE_ENV=development npm run worker &
+worker_pid=$!
+
+wait -n "${app_pid}" "${worker_pid}"

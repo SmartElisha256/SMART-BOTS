@@ -4,28 +4,38 @@ import { logger } from '../utils/logger.js';
 import { createMessagingAdapter } from '../providers/messaging/factory.js';
 import { processIncomingMessage } from '../services/commandService.js';
 import { checkAndConsumeDailyRequest, recordOutgoingMessage, formatQuotaLimitMessage, claimQuotaNotice } from '../services/usageService.js';
-import { handlePaymentCommand, isPaymentCommand, getAdminPhones } from '../services/manualPaymentService.js';
+import { handlePaymentCommand, isPaymentCommand, isPaymentAdmin, getAdminPhones, getPaymentRequestByReference } from '../services/manualPaymentService.js';
+import { claimMessage, markMessageProcessed, markMessageFailed } from '../utils/messageDeduplication.js';
 
 function safeEqualText(left, right) {
   const a = Buffer.from(String(left ?? ''));
   const b = Buffer.from(String(right ?? ''));
   return a.length === b.length && timingSafeEqual(a, b);
 }
+
 export function handleVerifyWebhook(req, res) {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
-  if (mode === 'subscribe' && safeEqualText(token, env.WHATSAPP_WEBHOOK_VERIFY_TOKEN) && env.WHATSAPP_WEBHOOK_VERIFY_TOKEN !== 'replace-me') return res.status(200).type('text/plain').send(String(challenge ?? ''));
+  if (mode === 'subscribe' && safeEqualText(token, env.WHATSAPP_WEBHOOK_VERIFY_TOKEN) && env.WHATSAPP_WEBHOOK_VERIFY_TOKEN !== 'replace-me') {
+    return res.status(200).type('text/plain').send(String(challenge ?? ''));
+  }
   return res.status(403).json({ ok: false, message: 'Webhook verification failed' });
 }
+
 function validSignature(req) {
-  if (!env.WHATSAPP_APP_SECRET || env.WHATSAPP_APP_SECRET === 'replace-me') return env.NODE_ENV !== 'production';
+  if (!env.WHATSAPP_APP_SECRET || env.WHATSAPP_APP_SECRET === 'replace-me') {
+    // Never skip signature checks in production.
+    if (env.NODE_ENV === 'production') return false;
+    return true;
+  }
   const signature = req.get('x-hub-signature-256');
   if (!signature?.startsWith('sha256=') || !req.rawBody) return false;
   const expected = 'sha256=' + createHmac('sha256', env.WHATSAPP_APP_SECRET).update(req.rawBody).digest('hex');
   return safeEqualText(signature, expected);
 }
-async function notifyPaymentAdmins({ provider, sender, reference, transactionId, amount, durationDays }) {
+
+async function notifyPaymentAdmins({ provider, sender, reference, transactionId, amount, planLabel, durationDays }) {
   const admins = getAdminPhones();
   if (!admins.length) {
     logger.warn({ reference }, 'Payment transaction received but PAYMENT_ADMIN_PHONES is not configured');
@@ -33,40 +43,119 @@ async function notifyPaymentAdmins({ provider, sender, reference, transactionId,
   }
   const details = '💳 PREMIUM PAYMENT — TRANSACTION ID\nReference: ' + reference +
     '\nCustomer: ' + sender + '\nTransaction ID: ' + transactionId +
-    '\nExpected amount: UGX ' + Number(amount).toLocaleString('en-UG') +
-    '\nAccess duration: ' + durationDays + ' day(s)\n\nVerify this transaction in the merchant account before replying: APPROVE ' + reference +
-    '\nTo decline it, reply: REJECT ' + reference;
+    '\nCustomer-selected plan: ' + planLabel +
+    '\nExpected amount (verify; not confirmed): UGX ' + Number(amount).toLocaleString('en-UG') +
+    '\nAccess duration if approved: ' + durationDays + ' day(s)\nStatus: PENDING — not yet verified\n\nVerify the transaction ID and exact amount in the merchant account before replying: APPROVE ' + reference +
+    '\nTo decline it, reply: REJECT ' + reference + '\nFor the grouped queue, reply: PENDING.';
   for (const admin of admins) {
-    try { await provider.sendMessage({ to: admin, text: details }); }
-    catch (error) { logger.error({ error, admin, reference }, 'Could not notify payment administrator'); }
+    try {
+      await provider.sendMessage({ to: admin, text: details });
+    } catch (error) {
+      logger.error({ error, admin, reference }, 'Could not notify payment administrator');
+    }
   }
 }
+
 export async function handleIncomingWebhook(req, res) {
-  if (!validSignature(req)) return res.status(401).json({ ok: false, message: 'Invalid webhook signature' });
+  if (!validSignature(req)) {
+    return res.status(401).json({ ok: false, message: 'Invalid webhook signature' });
+  }
+
   const entries = req.body?.entry ?? [];
   const messages = [];
   for (const entry of entries) {
     for (const change of entry.changes ?? []) {
       for (const message of change.value?.messages ?? []) {
-        if (message.from && typeof message.text?.body === 'string' && message.text.body.trim()) messages.push({ sender: message.from, text: message.text.body.trim() });
+        if (!message.from) continue;
+        const messageId = message.id ? String(message.id) : null;
+        let normalized = null;
+        if (typeof message.text?.body === 'string' && message.text.body.trim()) {
+          normalized = { id: messageId, sender: message.from, text: message.text.body.trim(), type: 'text' };
+        } else {
+          normalized = { id: messageId, sender: message.from, text: '', type: message.type || 'unsupported' };
+        }
+        if (messageId) {
+          const claim = await claimMessage(messageId);
+          if (!claim.claimed) {
+            logger.info({ messageId, from: message.from, status: claim.status }, 'Skipping already-claimed WhatsApp message');
+            continue;
+          }
+        }
+        messages.push(normalized);
       }
     }
   }
+
+  // Acknowledge quickly so Meta does not retry while we process.
   if (!messages.length) return res.sendStatus(200);
+
   const provider = createMessagingAdapter();
   try {
     for (const message of messages) {
+      try {
       let reply;
       let paymentNotification = null;
-      if (isPaymentCommand(message.text)) {
+      const adminControlCommand = /^(approve|reject|setplan|changeplan|pending|pendingpayments|payments)(?:\s|$)/i.test(message.text);
+
+      if (message.type !== 'text' && message.type !== 'audio' && message.type !== 'image') {
+        reply = 'I received your message, but I can currently understand text, images, and voice notes only. Please type your request as text. Send HELP to see examples.';
+        await provider.sendMessage({ to: message.sender, text: reply });
+        try { await recordOutgoingMessage(message.sender); } catch (usageError) {
+          logger.warn({ error: usageError, phone: message.sender }, 'Could not record outgoing message usage');
+        }
+        await markMessageProcessed(message.id);
+        continue;
+      }
+
+      if (message.type === 'audio' || message.type === 'image') {
+        if (isPaymentAdmin(message.sender)) {
+          reply = '🔐 This number is reserved for payment alerts and admin controls. Use the customer-facing bot number for sports features.';
+        } else {
+          const quota = await checkAndConsumeDailyRequest(message.sender, message.type === 'audio' ? '[voice note]' : '[image or screenshot]');
+          if (!quota.allowed) {
+            const period = quota.period === 'month' ? 'month' : 'day';
+            if (!(await claimQuotaNotice(message.sender, period))) {
+              await markMessageProcessed(message.id);
+              continue;
+            }
+            reply = formatQuotaLimitMessage(quota);
+          } else {
+            reply = message.type === 'audio'
+              ? '🎙️ Thanks for the voice note! Voice-message understanding is planned for a future upgrade. For now, please type your football question, for example: “What matches are on today?” or “Arsenal vs Chelsea, who might win?”'
+              : '🖼️ Thanks for sharing the image! Image and screenshot analysis is planned for the next upgrade. You can still get help now by typing the match, teams, or statistics shown in the image. I look forward to helping you with image analysis soon!';
+          }
+        }
+        await provider.sendMessage({ to: message.sender, text: reply });
+        try {
+          await recordOutgoingMessage(message.sender);
+        } catch (usageError) {
+          logger.warn({ error: usageError, phone: message.sender }, 'Could not record outgoing message usage');
+        }
+        await markMessageProcessed(message.id);
+        continue;
+      }
+
+      if (isPaymentAdmin(message.sender) && !adminControlCommand) {
+        // Keep the personal admin number out of customer sports flows and quotas.
+        reply = '🔐 This number is reserved for payment alerts and admin controls. Use the customer-facing bot number for sports features. Admin commands: PENDING, APPROVE REF, REJECT REF, SETPLAN REF DAY|WEEK|MONTH.';
+      } else if (isPaymentCommand(message.text)) {
         reply = await handlePaymentCommand({ phone: message.sender, message: message.text });
-        if (reply.startsWith('✅ Transaction ID received. Reference: ')) {
+        if (reply && reply.startsWith('✅ Transaction ID received. Reference: ')) {
           const ref = reply.match(/Reference:\s*(\d+)/);
-          const tx = message.text.match(/^PAY\s+(?:(DAY|WEEK|MONTH)\s+)?(.+)$/i);
-          const planKey = tx?.[1]?.toLowerCase() || 'week';
-          const price = planKey === 'day' ? env.PREMIUM_PRICE_DAY_UGX : planKey === 'month' ? env.PREMIUM_PRICE_MONTH_UGX : (env.PREMIUM_PRICE_WEEK_UGX ?? env.PREMIUM_PRICE_UGX);
-          const durationDays = planKey === 'day' ? 1 : planKey === 'month' ? 30 : 7;
-          if (ref) paymentNotification = { reference: ref[1], transactionId: tx?.[2]?.trim(), amount: price, durationDays };
+          if (ref) {
+            // Always build the admin alert from the saved payment record, not by
+            // re-parsing customer text; this keeps plan, amount and duration aligned.
+            const savedPayment = await getPaymentRequestByReference(ref[1]);
+            if (savedPayment) {
+              paymentNotification = {
+                reference: String(savedPayment.id),
+                transactionId: savedPayment.transactionId,
+                amount: savedPayment.amountUgx,
+                planLabel: savedPayment.planKey.toUpperCase() + ' (' + savedPayment.durationDays + ' day(s))',
+                durationDays: savedPayment.durationDays
+              };
+            }
+          }
         }
       } else {
         const quota = await checkAndConsumeDailyRequest(message.sender, message.text);
@@ -74,20 +163,41 @@ export async function handleIncomingWebhook(req, res) {
           const period = quota.period === 'month' ? 'month' : 'day';
           // Once the user has received this period's limit notice, stop replying
           // to repeated over-limit commands to avoid unnecessary WhatsApp charges.
-          if (!(await claimQuotaNotice(message.sender, period))) continue;
+          if (!(await claimQuotaNotice(message.sender, period))) {
+            await markMessageProcessed(message.id);
+            continue;
+          }
           reply = formatQuotaLimitMessage(quota);
         } else {
           reply = await processIncomingMessage({ sender: message.sender, message: message.text, provider: 'whatsapp' });
         }
       }
-      await provider.sendMessage({ to: message.sender, text: reply || 'I could not process that message. Send HELP for available commands.' });
-      try { await recordOutgoingMessage(message.sender); }
-      catch (usageError) { logger.warn({ error: usageError, phone: message.sender }, 'Could not record outgoing message usage'); }
-      if (paymentNotification) await notifyPaymentAdmins({ provider, sender: message.sender, ...paymentNotification });
+
+      await provider.sendMessage({
+        to: message.sender,
+        text: reply || 'I could not process that message. Send HELP for available commands.'
+      });
+      try {
+        await recordOutgoingMessage(message.sender);
+      } catch (usageError) {
+        logger.warn({ error: usageError, phone: message.sender }, 'Could not record outgoing message usage');
+      }
+      if (paymentNotification) {
+        await notifyPaymentAdmins({ provider, sender: message.sender, ...paymentNotification });
+      }
+      await markMessageProcessed(message.id);
+      } catch (messageError) {
+        await markMessageFailed(message.id, messageError).catch((stateError) => {
+          logger.error({ stateError, messageId: message.id }, 'Could not persist failed webhook state');
+        });
+        throw messageError;
+      }
     }
     return res.sendStatus(200);
   } catch (error) {
     logger.error({ error, requestId: req.id }, 'WhatsApp webhook processing failed');
+    // Still return 200 when possible after partial processing to reduce Meta retries,
+    // but surface 500 when the whole batch failed before any useful work.
     return res.status(500).json({ ok: false, message: 'Webhook processing failed; retry later' });
   }
 }

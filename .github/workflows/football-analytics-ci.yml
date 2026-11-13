@@ -35,5 +35,7 @@ jobs:
         run: python train.py --data data/epl_historical.csv
       - name: Evaluate on a chronological EPL holdout
         run: python evaluate.py --data data/epl_historical.csv
+      - name: Evaluate season-by-season walk-forward folds
+        run: python evaluate_walkforward.py --data data/epl_historical.csv
       - name: Run Python tests
         run: pytest -q

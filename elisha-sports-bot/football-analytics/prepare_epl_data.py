@@ -1,30 +1,75 @@
-"""Combine football-data.co.uk EPL season CSVs into the model's normalized schema."""
+"""Combine football-data.co.uk EPL season CSVs into a normalized training dataset."""
 from pathlib import Path
+import re
+import json
+import os
+import tempfile
 import pandas as pd
+from features import load_matches
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
-SEASON_FILES = [
+# Preferred explicit list; any additional epl_YYYY_YY.csv files are discovered automatically.
+KNOWN_SEASON_FILES = [
     "epl_2020_21.csv",
     "epl_2021_22.csv",
     "epl_2022_23.csv",
     "epl_2023_24.csv",
     "epl_2024_25.csv",
+    "epl_2025_26.csv",  # optional until the file is added
 ]
 OUTPUT = DATA_DIR / "epl_historical.csv"
+METADATA = DATA_DIR / "dataset_metadata.json"
 
+
+def discover_season_files() -> list[str]:
+    """Return sorted season CSV filenames present under data/.
+
+    Only accepts epl_YYYY_YY.csv (not epl_historical.csv or synthetic files).
+    """
+    season_re = re.compile(r"^epl_\d{4}_\d{2}\.csv$")
+    found = {
+        path.name
+        for path in DATA_DIR.glob("epl_*.csv")
+        if path.is_file() and season_re.match(path.name)
+    }
+    ordered = [name for name in KNOWN_SEASON_FILES if name in found]
+    extras = sorted(found - set(KNOWN_SEASON_FILES))
+    ordered.extend(extras)
+    if not ordered:
+        raise FileNotFoundError(
+            f"No EPL season CSVs found in {DATA_DIR}. Expected files like epl_2024_25.csv."
+        )
+    return ordered
+
+# football-data.co.uk season CSVs — what the bot requires vs optional extras.
+# Date is required so features can be computed only from matches before kickoff.
+REQUIRED_SEASON_COLUMNS = {"Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG"}
+# Shot / corner / foul / card columns are optional extras (used when present).
+OPTIONAL = {
+    "HS": "home_shots", "AS": "away_shots",
+    "HST": "home_shots_on_target", "AST": "away_shots_on_target",
+    "HC": "home_corners", "AC": "away_corners",
+    "HF": "home_fouls", "AF": "away_fouls",
+    "HY": "home_yellow_cards", "AY": "away_yellow_cards",
+    "HR": "home_red_cards", "AR": "away_red_cards",
+}
 
 def main():
+    season_files = discover_season_files()
     frames = []
-    for filename in SEASON_FILES:
+    for filename in season_files:
         path = DATA_DIR / filename
         if not path.exists():
             raise FileNotFoundError(f"Missing season file: {path}")
         df = pd.read_csv(path, encoding="utf-8-sig")
-        required = {"Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG"}
-        missing = required - set(df.columns)
+        missing = REQUIRED_SEASON_COLUMNS - set(df.columns)
         if missing:
-            raise ValueError(f"{filename} is missing columns: {', '.join(sorted(missing))}")
-
+            raise ValueError(
+                f"{filename} is missing mandatory columns: {', '.join(sorted(missing))}. "
+                "Required: Date, HomeTeam, AwayTeam, FTHG, FTAG. "
+                "Optional extras (shots/corners/fouls/cards): "
+                + ", ".join(sorted(OPTIONAL.keys()))
+            )
         normalized = pd.DataFrame({
             "match_date": pd.to_datetime(df["Date"], format="%d/%m/%Y", errors="coerce", dayfirst=True, utc=True),
             "home_team": df["HomeTeam"].astype("string").str.strip(),
@@ -32,24 +77,66 @@ def main():
             "home_goals": pd.to_numeric(df["FTHG"], errors="coerce"),
             "away_goals": pd.to_numeric(df["FTAG"], errors="coerce"),
         })
-        # Ignore rows without a completed full-time score, if any.
+        for source, target in OPTIONAL.items():
+            if source in df.columns:
+                normalized[target] = pd.to_numeric(df[source], errors="coerce")
         normalized = normalized.dropna(subset=["match_date", "home_team", "away_team", "home_goals", "away_goals"])
         frames.append(normalized)
-
     combined = pd.concat(frames, ignore_index=True)
+    combined = combined.sort_values("match_date", kind="stable").reset_index(drop=True)
+    provider_path = DATA_DIR / "provider_matches.csv"
+    if provider_path.exists():
+        provider = load_matches(provider_path)
+        if provider.empty:
+            raise ValueError("Configured provider file contains no completed matches.")
+        if "source" in provider.columns and provider["source"].astype(str).str.lower().eq("synthetic").any():
+            raise ValueError("Provider dataset contains synthetic rows; refusing to mix them with real EPL history.")
+        latest_bundled = combined["match_date"].max()
+        if (provider["match_date"] <= latest_bundled).any():
+            raise ValueError(
+                "provider_matches.csv must contain only completed matches strictly newer than the bundled history "
+                f"(latest bundled date: {latest_bundled.date()}). Filter/verify the provider export before preparing data."
+            )
+        provider = provider.copy()
+        if "source" not in provider.columns:
+            provider["source"] = "configured_provider_csv"
+        combined = pd.concat([combined, provider], ignore_index=True, sort=False)
     if combined.duplicated(["match_date", "home_team", "away_team"]).any():
-        raise ValueError("Duplicate fixtures detected across season files.")
+        raise ValueError("Duplicate fixtures detected across bundled and provider data.")
     for column in ("home_goals", "away_goals"):
         if (combined[column] < 0).any() or (combined[column] % 1 != 0).any():
             raise ValueError(f"{column} contains invalid scores.")
         combined[column] = combined[column].astype(int)
-
     combined = combined.sort_values("match_date", kind="stable").reset_index(drop=True)
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    combined.to_csv(OUTPUT, index=False, date_format="%Y-%m-%dT%H:%M:%SZ")
+    temp_name = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="", suffix=".csv", prefix=".epl-historical-", dir=OUTPUT.parent, delete=False) as tmp:
+            temp_name = tmp.name
+            combined.to_csv(tmp, index=False, date_format="%Y-%m-%dT%H:%M:%SZ")
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        load_matches(temp_name)
+        os.replace(temp_name, OUTPUT)
+        temp_name = None
+    finally:
+        if temp_name and os.path.exists(temp_name):
+            os.unlink(temp_name)
+    meta = {
+        "output": str(OUTPUT.name),
+        "match_count": int(len(combined)),
+        "date_from": str(combined["match_date"].min().date()),
+        "date_to": str(combined["match_date"].max().date()),
+        "season_files": season_files,
+        "provider_merged": provider_path.exists(),
+        "updated_at_utc": pd.Timestamp.now(tz="UTC").isoformat(),
+        "note": "Not automatically current for unfinished seasons; retrain after adding new CSVs.",
+    }
+    METADATA.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+    print(f"Wrote dataset metadata to {METADATA}")
     print(f"Saved {len(combined)} completed EPL matches to {OUTPUT}")
     print(f"Date range: {combined['match_date'].min().date()} to {combined['match_date'].max().date()}")
-
+    print("Optional match statistics included: " + ", ".join(c for c in OPTIONAL.values() if c in combined.columns))
 
 if __name__ == "__main__":
     main()

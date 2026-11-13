@@ -1,0 +1,16 @@
+{
+  "output": "epl_historical.csv",
+  "match_count": 1900,
+  "date_from": "2020-09-12",
+  "date_to": "2025-05-25",
+  "season_files": [
+    "epl_2020_21.csv",
+    "epl_2021_22.csv",
+    "epl_2022_23.csv",
+    "epl_2023_24.csv",
+    "epl_2024_25.csv"
+  ],
+  "provider_merged": false,
+  "updated_at_utc": "2026-11-02T14:20:25.753370+00:00",
+  "note": "Not automatically current for unfinished seasons; retrain after adding new CSVs."
+}

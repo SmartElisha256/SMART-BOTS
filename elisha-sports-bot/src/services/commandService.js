@@ -1,35 +1,94 @@
 import { z } from 'zod';
-import { upsertUser, findUserByPhone } from './userService.js';
+import { upsertUser } from './userService.js';
 import { getUserPreferences, updateUserPreferences } from './preferencesService.js';
-import { getUserSubscriptions, subscribeUser, unsubscribeUser } from './subscriptionService.js';
-import { getUpcomingFixtures, getLeagueTable, getTeamFormStats, getHeadToHeadRecord, getHistoricalSeasonFixtures } from './sportsService.js';
-import { formatSeasonReport } from './historicalSeasonService.js';
-import { analyzeMatch } from './analysisService.js';
-import { getMatchContext, formatMatchContext } from './fixtureContextService.js';
+import { getUserSubscriptions } from './subscriptionService.js';
+import { answerFootballQuestion } from './footballAssistantService.js';
+import { detectFootballIntent } from './footballMlService.js';
 import { logger } from '../utils/logger.js';
+import { parseCommand } from '../commands/intentParser.js';
+import { getMenuMessage, getHelpMessage, getFriendlyFallback, premiumRequiredMessage } from '../commands/messages.js';
+import {
+  handleFixturesCommand,
+  handleLiveCommand,
+  handleTableCommand,
+  handleFormCommand,
+  handleH2HCommand,
+  handleSeasonCommand,
+  handleLeaguesCommand
+} from '../commands/sportsCommands.js';
+import { runAnalyzeCommand, runTipCommand } from '../commands/analyzeCommand.js';
+import { addAnalysisJob, isQueueAvailable } from '../jobs/queue.js';
+import { maybeAppendUpgradePrompt } from './conversionService.js';
+import { submitFeedback } from './feedbackService.js';
+import { formatPaymentInstructions } from './manualPaymentService.js';
 
 const commandRequestSchema = z.object({
   sender: z.string().min(5),
   message: z.string().trim().default(''),
-  provider: z.enum(['whatsapp', 'callmebot', 'mock']).default('whatsapp')
+  provider: z.enum(['whatsapp', 'mock']).default('whatsapp')
 });
 
-const COMMAND_REGEX = /^([a-z0-9]+)(?:\s+(.+))?$/i;
+async function getFootballAssistantReply(question) {
+  try {
+    return await answerFootballQuestion(question);
+  } catch (error) {
+    logger.warn({ error }, 'Open-ended football AI unavailable; using friendly fallback');
+    return null;
+  }
+}
 
-export function parseCommand(input) {
-  const normalized = String(input).trim().toLowerCase();
-  const match = normalized.match(COMMAND_REGEX);
+async function hasActivePremiumSubscription(phone) {
+  const subscriptions = await getUserSubscriptions(phone);
+  return subscriptions.some((subscription) =>
+    String(subscription?.plan ?? '').toLowerCase() === 'premium' && subscription?.is_active !== false
+  );
+}
 
-  if (!match) {
-    return { command: null, args: null, raw: normalized };
+async function dispatchHeavyAnalysis({ sender, kind, args, provider }) {
+  if (isQueueAvailable()) {
+    try {
+      const result = await addAnalysisJob({ phone: sender, kind, args, provider });
+      if (result.queued) {
+        if (result.deduped) {
+          return '⏳ Your previous analysis request is still running. I will send the result here when it is ready.';
+        }
+        return '⏳ Working on your match analysis now. This can take up to about 30 seconds. I will send the full report in this chat when it is ready.';
+      }
+    } catch (error) {
+      logger.warn({ error, sender, kind }, 'Could not enqueue analysis; running inline');
+    }
   }
 
-  return {
-    command: match[1],
-    args: match[2] ? match[2].trim() : null,
-    raw: normalized
-  };
+  if (kind === 'tip') return runTipCommand({ phone: sender });
+  return runAnalyzeCommand(args, { phone: sender });
 }
+
+async function handleTeamCommand(sender, args) {
+  const team = String(args ?? '').trim();
+  if (!team) {
+    const prefs = await getUserPreferences(sender);
+    if (prefs?.preferred_team) {
+      return (
+        '⭐ Your favourite team: ' + prefs.preferred_team +
+        '\n\nTry: FORM ' + prefs.preferred_team +
+        '\nOr: FIXTURES\nClear with: TEAM CLEAR'
+      );
+    }
+    return 'Set a favourite team: TEAM Arsenal\nThen use FORM / FIXTURES more easily. Clear with TEAM CLEAR.';
+  }
+  if (/^(clear|none|remove)$/i.test(team)) {
+    await updateUserPreferences(sender, { preferred_team: null });
+    return 'Favourite team cleared.';
+  }
+  await updateUserPreferences(sender, { preferred_team: team });
+  return (
+    '⭐ Favourite team saved: ' + team +
+    '\n\nQuick actions:\n• FORM ' + team +
+    '\n• Ask: How is ' + team + ' doing?'
+  );
+}
+
+export { parseCommand, interpretNaturalLanguage } from '../commands/intentParser.js';
 
 export async function processIncomingMessage(input) {
   try {
@@ -45,274 +104,135 @@ export async function processIncomingMessage(input) {
       'Processing incoming message'
     );
 
+    let reply;
+
     if (!command) {
-      return getHelpMessage();
+      const aiReply = await getFootballAssistantReply(raw);
+      reply = aiReply || getFriendlyFallback();
+    } else {
+      switch (command) {
+        case 'menu':
+          reply = getMenuMessage();
+          break;
+
+        case 'help':
+          reply = getHelpMessage();
+          break;
+
+        case 'support':
+          reply = '🛟 SUPPORT\n\nFor a bug, suggestion, or account issue, send FEEDBACK followed by a short description. For payment verification, send PAYMENT followed by your transaction ID. An administrator will review submitted requests; never share your PIN or password.\n\nSend HELP for usage examples.';
+          break;
+
+        case 'upgrade':
+          reply = formatPaymentInstructions();
+          break;
+
+        case 'leagues':
+        case 'league':
+          reply = handleLeaguesCommand();
+          break;
+
+        case 'team':
+        case 'myteam':
+          reply = await handleTeamCommand(sender, args);
+          break;
+
+        case 'football_help': {
+          if (detectFootballIntent(raw) === 'ml_ai') {
+            reply = 'Please include the two teams for a match prediction, for example: Arsenal vs Chelsea, who might win?';
+          } else {
+            const aiReply = await getFootballAssistantReply(raw);
+            reply = aiReply || getFriendlyFallback();
+          }
+          break;
+        }
+
+        case 'fixtures':
+          reply = await handleFixturesCommand(args);
+          break;
+
+        case 'tip':
+        case 'tips':
+          reply = await dispatchHeavyAnalysis({
+            sender,
+            kind: 'tip',
+            args: null,
+            provider: payload.provider
+          });
+          break;
+
+        case 'live':
+          reply = await handleLiveCommand(args);
+          break;
+
+        case 'table':
+          reply = await handleTableCommand(args);
+          break;
+
+        case 'form': {
+          const teamArg = args || prefs?.preferred_team;
+          reply = await handleFormCommand(teamArg);
+          break;
+        }
+
+        case 'h2h':
+          reply = await handleH2HCommand(args);
+          break;
+
+        case 'analyze':
+        case 'analysis':
+          if (!(await hasActivePremiumSubscription(sender))) {
+            reply = premiumRequiredMessage();
+          } else {
+            reply = await dispatchHeavyAnalysis({
+              sender,
+              kind: 'analyze',
+              args,
+              provider: payload.provider
+            });
+          }
+          break;
+
+        case 'season':
+        case 'historical':
+          if (!(await hasActivePremiumSubscription(sender))) {
+            reply = premiumRequiredMessage();
+          } else {
+            reply = await handleSeasonCommand(args);
+          }
+          break;
+
+        case 'start':
+          await updateUserPreferences(sender, { notifications_enabled: true });
+          reply = 'Notifications enabled. You will now receive match alerts.';
+          break;
+
+        case 'stop':
+          await updateUserPreferences(sender, { notifications_enabled: false });
+          reply = 'Notifications disabled. You will not receive match alerts.';
+          break;
+
+        case 'feedback':
+        case 'review':
+          reply = await submitFeedback({ phone: sender, text: args || '' });
+          break;
+
+        default:
+          logger.warn({ phone: sender, command }, 'Unknown command');
+          reply = `Unknown command: "${raw}". Reply with MENU or HELP.`;
+      }
     }
 
-    switch (command) {
-      case 'menu':
-        return getMenuMessage();
-
-      case 'help':
-        return getHelpMessage();
-
-      case 'fixtures':
-        return await handleFixturesCommand(args);
-
-      case 'live':
-        return await handleLiveCommand(args);
-
-      case 'table':
-        return await handleTableCommand(args);
-
-      case 'form':
-        return await handleFormCommand(args);
-
-      case 'h2h':
-        return await handleH2HCommand(args);
-
-      case 'analyze':
-      case 'analysis':
-        return await handleAnalyzeCommand(args);
-
-      case 'season':
-      case 'historical':
-        return await handleSeasonCommand(args);
-
-      case 'start':
-        await updateUserPreferences(sender, { notifications_enabled: true });
-        return 'Notifications enabled. You will now receive match alerts.';
-
-      case 'stop':
-        await updateUserPreferences(sender, { notifications_enabled: false });
-        return 'Notifications disabled. You will not receive match alerts.';
-
-      default:
-        logger.warn({ phone: sender, command }, 'Unknown command');
-        return `Unknown command: "${raw}". Reply with MENU or HELP.`;
+    // Soft conversion prompt for free users after several useful replies
+    if (command && !['upgrade', 'menu', 'help', 'feedback', 'review'].includes(command)) {
+      reply = await maybeAppendUpgradePrompt(sender, reply);
     }
+
+    return reply;
   } catch (error) {
     logger.error({ error }, 'Error processing incoming message');
     return 'An error occurred. Please try again later.';
   }
 }
 
-function getMenuMessage() {
-  return `🏟️ ELISHA SPORTS BOT
-
-Available commands:
-
-• MENU — show this menu
-• FIXTURES — upcoming matches
-• LIVE — live scores (when available)
-• TABLE — league standings
-• FORM [TEAM] — recent results for a team
-• H2H [TEAM A] vs [TEAM B] — head-to-head stats
-• ANALYZE [TEAM A] vs [TEAM B] — form, squad availability, strength, lineups, and data-quality analysis
-• SEASON [LEAGUE] [YEAR] — historical season summary
-• HELP — usage guide
-• UPGRADE — view Premium plans and payment steps
-• START — enable notifications
-• STOP — disable notifications`;
-}
-
-function getHelpMessage() {
-  return `📖 HELP - How to use ELISHA SPORTS BOT
-
-Examples:
-
-FIXTURES
-  Shows next 3 upcoming matches.
-
-TABLE
-  Shows league standings (top 5 teams).
-
-FORM Arsenal
-  Shows Arsenal's last 5 matches.
-
-H2H Manchester City vs Liverpool
-  Shows historical head-to-head record.
-
-ANALYZE Arsenal vs Chelsea
-  Compares recent form, head-to-head, squad availability, team strength, lineup context, and data-quality warnings.
-
-SEASON Premier League 2023
-  Summarizes completed fixtures, points, goals, and home/away records for a historical season.
-
-LIVE
-  Shows current live scores (when available).
-
-START / STOP
-  Enable or disable match notifications.
-
-UPGRADE\n  Shows Premium plans and manual payment instructions. Activation requires administrator verification.\n\nReply MENU for all commands.`;
-}
-
-async function handleFixturesCommand(args) {
-  try {
-    const limit = args ? Math.min(parseInt(args) || 3, 10) : 3;
-    const fixtures = await getUpcomingFixtures({ limit, onlyResults: false });
-
-    if (!fixtures || fixtures.length === 0) {
-      return 'No upcoming fixtures available.';
-    }
-
-    const list = fixtures
-      .map((match, idx) => {
-        const time = new Date(match.time).toLocaleDateString('en-US', {
-          month: 'short',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit'
-        });
-        return `${idx + 1}. ${match.home} vs ${match.away}\n   ${time}`;
-      })
-      .join('\n\n');
-
-    return fixtures[0]?.source === 'api-football' ? `📅 UPCOMING FIXTURES\n\n${list}\n\nSource: football data API` : `⚠️ DEMO DATA — not live or official\n\n📅 SAMPLE FIXTURES\n\n${list}`;
-  } catch (error) {
-    logger.error({ error }, 'Error fetching fixtures');
-    return 'Could not fetch fixtures. Please try again.';
-  }
-}
-
-async function handleLiveCommand(args) {
-  try {
-    const liveMatches = await getUpcomingFixtures({ limit: 5, liveOnly: true });
-
-    if (!liveMatches || liveMatches.length === 0) {
-      return 'No live matches at the moment.';
-    }
-
-    const list = liveMatches
-      .map((match) => {
-        const score = match.score ? `${match.score}` : 'LIVE';
-        const status = match.status ?? 'In Progress';
-        return `⚽ ${match.home} ${score} ${match.away}\n   (${status})`;
-      })
-      .join('\n\n');
-
-    return `🔴 LIVE MATCHES\n\n${list}`;
-  } catch (error) {
-    logger.error({ error }, 'Error fetching live scores');
-    return 'Could not fetch live scores. Please try again.';
-  }
-}
-
-async function handleTableCommand(args) {
-  try {
-    const league = args ?? 'Premier League';
-    const table = await getLeagueTable({ league, limit: 5 });
-
-    if (!table || table.length === 0) {
-      return `No standings available for ${league}.`;
-    }
-
-    const list = table
-      .map(
-        (entry) => `${String(entry.position).padStart(2, ' ')}. ${entry.team.padEnd(20)} ${String(entry.points).padStart(2)}pts`
-      )
-      .join('\n');
-
-    return table[0]?.source === 'api-football' ? `📊 LEAGUE TABLE - ${league}\n\n${list}\n\nSource: football data API` : `⚠️ DEMO DATA — not live or official\n\n📊 SAMPLE LEAGUE TABLE - ${league}\n\n${list}`;
-  } catch (error) {
-    logger.error({ error }, 'Error fetching table');
-    return 'Could not fetch standings. Please try again.';
-  }
-}
-
-async function handleFormCommand(args) {
-  if (!args) {
-    return 'Please specify a team. Example: FORM Arsenal';
-  }
-
-  try {
-    const team = args.trim();
-    const form = await getTeamFormStats(team, { limit: 5 });
-
-    if (!form || form.length === 0) {
-      return `No recent form data found for ${team}.`;
-    }
-
-    const results = form
-      .map((match) => {
-        if (match.result === 'W') return '✅ W';
-        if (match.result === 'D') return '⚪ D';
-        if (match.result === 'L') return '❌ L';
-        return '? -';
-      })
-      .join(' ');
-
-    const stats = form[0];
-    const summary = `${stats.wins}W ${stats.draws}D ${stats.losses}L`;
-
-    return `📈 RECENT FORM - ${team}\n\nLast 5: ${results}\n${summary}`;
-  } catch (error) {
-    logger.error({ error }, 'Error fetching form');
-    return `Could not fetch form for ${args}. Please try again.`;
-  }
-}
-
-async function handleH2HCommand(args) {
-  if (!args || !args.includes(' vs ') && !args.includes(' v ')) {
-    return 'Usage: H2H Manchester City vs Liverpool';
-  }
-
-  try {
-    const parts = args.split(/\s+vs?\s+/i);
-    if (parts.length !== 2) {
-      return 'Usage: H2H Manchester City vs Liverpool';
-    }
-
-    const [teamA, teamB] = [parts[0].trim(), parts[1].trim()];
-    const record = await getHeadToHeadRecord(teamA, teamB);
-
-    if (!record) {
-      return `No head-to-head data found for ${teamA} vs ${teamB}.`;
-    }
-
-    return `🏆 HEAD-TO-HEAD: ${teamA} vs ${teamB}\n\n${teamA}: ${record.wins_a} wins\n${teamB}: ${record.wins_b} wins\nDraws: ${record.draws}\n\nLast match: ${record.last_match_date}`;
-  } catch (error) {
-    logger.error({ error }, 'Error fetching H2H');
-    return 'Could not fetch head-to-head data. Please try again.';
-  }
-}
-
-async function handleSeasonCommand(args) {
-  const match = String(args ?? '').trim().match(/^(.*?)(?:\s+)?(20\d{2})$/);
-  if (!match) return 'Usage: SEASON Premier League 2023';
-  const league = match[1].trim() || 'Premier League';
-  const season = Number(match[2]);
-  try {
-    const fixtures = await getHistoricalSeasonFixtures({ league, season });
-    return formatSeasonReport({ league, season, fixtures, limit: 10 });
-  } catch (error) {
-    logger.warn({ error, league, season }, 'Historical season report unavailable');
-    return `Could not load historical data for ${league} ${season}. Check the configured data provider, API key, and historical-season access.`;
-  }
-}
 export default processIncomingMessage;
-
-
-async function handleAnalyzeCommand(args) {
-  if (!args || !/\s+vs?\s+/i.test(args)) {
-    return 'Usage: ANALYZE Arsenal vs Chelsea';
-  }
-  const parts = args.split(/\s+vs?\s+/i);
-  if (parts.length !== 2 || !parts[0].trim() || !parts[1].trim()) {
-    return 'Usage: ANALYZE Arsenal vs Chelsea';
-  }
-  const [teamA, teamB] = parts.map((part) => part.trim());
-  try {
-    const [formA, formB, h2h, context] = await Promise.all([
-      getTeamFormStats(teamA, { limit: 5 }),
-      getTeamFormStats(teamB, { limit: 5 }),
-      getHeadToHeadRecord(teamA, teamB),
-      getMatchContext(teamA, teamB).catch((error) => ({ dataQuality: { status: 'partial', warnings: [error.message] } }))
-    ]);
-    return await analyzeMatch({ teamA, teamB, formA, formB, h2h, matchContext: context ? formatMatchContext(context) : null });
-  } catch (error) {
-    logger.error({ error, teamA, teamB }, 'Error analyzing match');
-    return 'I could not analyze that match because the sports data service failed. Please try again later.';
-  }
-}

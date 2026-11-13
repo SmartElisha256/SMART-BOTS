@@ -11,7 +11,7 @@ import {
   claimQuotaNotice
 } from '../src/services/usageService.js';
 
-test('tracks football-data commands but not help or preference commands', () => {
+test('tracks football-data and natural-language requests but not help or preference commands', () => {
   assert.equal(isQuotaTrackedMessage('FIXTURES'), true);
   assert.equal(isQuotaTrackedMessage('ANALYZE Arsenal vs Chelsea'), true);
   assert.equal(isQuotaTrackedMessage('SEASON Premier League 2024'), true);
@@ -19,6 +19,8 @@ test('tracks football-data commands but not help or preference commands', () => 
   assert.equal(isQuotaTrackedMessage('HELP'), false);
   assert.equal(isQuotaTrackedMessage('START'), false);
   assert.equal(isQuotaTrackedMessage('something-unknown'), false);
+  assert.equal(isQuotaTrackedMessage('Explain the offside rule'), true);
+  assert.equal(isQuotaTrackedMessage('hello'), false);
 });
 
 test('extracts a command name from a message', () => {
@@ -28,7 +30,7 @@ test('extracts a command name from a message', () => {
 
 test('uses configured defaults for free and premium plans', () => {
   assert.equal(getDailyRequestLimit('free'), 20);
-  assert.equal(getDailyRequestLimit('premium'), 10);
+  assert.equal(getDailyRequestLimit('premium'), 200);
   assert.equal(getMonthlyRequestLimit('premium'), 300);
   assert.equal(getMonthlyRequestLimit('free'), null);
 });
