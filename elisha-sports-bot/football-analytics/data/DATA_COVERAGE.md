@@ -9,7 +9,8 @@ Bundled CSV seasons (English Premier League, football-data.co.uk style):
 | `epl_2022_23.csv` | 2022/23 |
 | `epl_2023_24.csv` | 2023/24 |
 | `epl_2024_25.csv` | 2024/25 |
-| `epl_2025_26.csv` | 2025/26 (optional — add when available) |
+| `epl_2025_26.csv` | 2025/26 (complete) |
+| `epl_2026_27.csv` | 2026/27 (partial — through early Nov 2026) |
 
 This is **not** automatically current for unfinished seasons or the live calendar.
 
