@@ -1,0 +1,39 @@
+{
+  "fit_matches": 1639,
+  "calibration_matches": 380,
+  "holdout_matches": 361,
+  "split_mode": "three_way",
+  "fit_date_range": {"from": "2020-09-12", "to": "2024-11-24"},
+  "calibration_date_range": {"from": "2024-11-25", "to": "2025-11-23"},
+  "holdout_date_range": {"from": "2025-11-24", "to": "2026-11-08"},
+  "uncalibrated": {
+    "accuracy": 0.39335180055401664,
+    "balanced_accuracy": 0.36120406974602104,
+    "log_loss": 1.4271984978539778,
+    "multiclass_brier_score": 0.806969577673383
+  },
+  "isotonic_calibrated": {
+    "accuracy": 0.39335180055401664,
+    "balanced_accuracy": 0.36120406974602104,
+    "log_loss": 1.4271984978539778,
+    "multiclass_brier_score": 0.806969577673383
+  },
+  "majority_baseline_class_from_training": "H",
+  "majority_baseline_accuracy": 0.39335180055401664,
+  "home_goals_mae": 1.0583396094748097,
+  "away_goals_mae": 0.9202697369909798,
+  "independent_poisson_1x2_accuracy": 0.43213296398891965,
+  "dixon_coles_1x2_accuracy": 0.43213296398891965,
+  "dixon_coles": {
+    "rho": -0.01,
+    "matches": 380,
+    "calibration_loglik": -1173.3093449377056,
+    "status": "fitted",
+    "objective": "normalised_score_loglik",
+    "split_mode": "three_way"
+  },
+  "calibration_decision": "rejected_no_log_loss_gain_on_calibration_check raw=1.1481 calibrated=1.7981",
+  "result_accuracy": 0.39335180055401664,
+  "log_loss": 1.4271984978539778,
+  "evaluation_note": "Classifier, goal models, and Dixon-Coles rho are fit only before the holdout. Holdout is late 2025 through early 2026/27."
+}
