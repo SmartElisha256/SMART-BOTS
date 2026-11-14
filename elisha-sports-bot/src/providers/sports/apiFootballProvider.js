@@ -40,26 +40,30 @@ function kampalaDate(date) {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
+function shiftDate(date, days) {
+  const shifted = new Date(date);
+  shifted.setUTCDate(shifted.getUTCDate() + days);
+  return kampalaDate(shifted);
+}
+
 export class ApiFootballProvider extends SportsDataProvider {
-  constructor({ fetchImpl = fetch } = {}) {
+  constructor({ fetchImpl = fetch, apiKey = env.SPORTS_API_KEY || env.FOOTBALL_DATA_API_KEY, apiBaseUrl = API_BASE } = {}) {
     super();
     this.fetchImpl = fetchImpl;
+    this.apiKey = apiKey;
+    this.apiBaseUrl = apiBaseUrl.replace(/\/$/, '');
   }
 
   async request(path, params = {}, { allowObject = false } = {}) {
-    const key = env.SPORTS_API_KEY || env.FOOTBALL_DATA_API_KEY;
-    if (!key) throw new Error('FOOTBALL_DATA_API_KEY or SPORTS_API_KEY is not configured');
+    if (!this.apiKey) throw new Error('FOOTBALL_DATA_API_KEY or SPORTS_API_KEY is not configured');
 
-    const url = new URL(`${API_BASE}/${path.replace(/^\//, '')}`);
-    for (const [keyName, value] of Object.entries(params)) {
-      if (value !== undefined && value !== null && value !== '') url.searchParams.set(keyName, String(value));
+    const url = new URL(`${this.apiBaseUrl}/${path.replace(/^\//, '')}`);
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value));
     }
 
     const response = await this.fetchImpl(url, {
-      headers: {
-        'X-Auth-Token': key,
-        accept: 'application/json'
-      },
+      headers: { 'X-Auth-Token': this.apiKey, accept: 'application/json' },
       signal: AbortSignal.timeout(10000)
     });
 
@@ -68,8 +72,8 @@ export class ApiFootballProvider extends SportsDataProvider {
     }
 
     const body = await response.json();
-    if (body?.error) {
-      const message = body.error?.message || body.error || 'unknown error';
+    if (body?.error || body?.errorCode) {
+      const message = body.message || body.error?.message || body.error || 'unknown error';
       throw new Error(`Football Data API rejected the request: ${message}`);
     }
 
@@ -82,16 +86,17 @@ export class ApiFootballProvider extends SportsDataProvider {
 
   async resolveLeagueId(leagueName) {
     const value = String(leagueName ?? '').trim();
-    if (/^\d+$/.test(value)) return value;
-
-    const normalized = value.toLowerCase().replace(/\s+/g, ' ').trim();
+    const normalized = value.toLowerCase().replace(/\s+/g, ' ');
     if (!normalized) return env.SPORTS_API_LEAGUE_ID || 'PL';
 
-    const direct = LEAGUE_CODES.get(normalized) || LEAGUE_CODES.get(normalized.replace(/\s+/g, ' '));
+    // API-Football numeric league IDs are not valid competition codes in v4.
+    if (/^\d+$/.test(value)) return env.SPORTS_API_LEAGUE_ID || 'PL';
+
+    const direct = LEAGUE_CODES.get(normalized);
     if (direct) return direct;
 
-    const uppercase = normalized.toUpperCase();
-    if (uppercase.length <= 8 && /^[A-Z0-9]+$/.test(uppercase)) return uppercase;
+    const code = value.toUpperCase();
+    if (code.length <= 8 && /^[A-Z0-9]+$/.test(code)) return code;
 
     return env.SPORTS_API_LEAGUE_ID || 'PL';
   }
@@ -99,33 +104,28 @@ export class ApiFootballProvider extends SportsDataProvider {
   async getFixtures({ limit = 3, onlyResults = false, liveOnly = false, league } = {}) {
     const competition = await this.resolveLeagueId(league || 'Premier League');
     const today = kampalaDate(new Date());
-    const endDate = kampalaDate(new Date(Date.now() + 14 * 86400000));
-
     const params = {
-      dateFrom: today,
-      dateTo: endDate
+      dateFrom: onlyResults ? shiftDate(new Date(), -30) : today,
+      dateTo: liveOnly || onlyResults ? today : shiftDate(new Date(), 14)
     };
 
-    if (liveOnly) {
-      params.status = 'LIVE';
-    } else if (onlyResults) {
-      params.status = 'FINISHED';
-    } else {
-      params.status = 'SCHEDULED';
-    }
+    if (liveOnly) params.status = 'LIVE';
+    else if (onlyResults) params.status = 'FINISHED';
+    else params.status = 'SCHEDULED';
 
     const rows = await this.request(`competitions/${competition}/matches`, params);
     const selectedRows = liveOnly
-      ? rows
+      ? rows.filter((row) => ['IN_PLAY', 'PAUSED', 'LIVE'].includes(row.status ?? ''))
       : onlyResults
-        ? rows.filter((row) => row.status === 'FINISHED' || FINISHED_STATUSES.has(row.status))
+        ? rows.filter((row) => FINISHED_STATUSES.has(row.status))
         : rows.filter((row) => {
-            const isFuture = row.utcDate ? new Date(row.utcDate).getTime() >= Date.now() : false;
-            const isScheduled = ['SCHEDULED', 'TIMED', 'LIVE'].includes(row.status ?? '');
-            return isFuture && isScheduled;
+            const kickoff = new Date(row.utcDate).getTime();
+            return Number.isFinite(kickoff) && kickoff >= Date.now() &&
+              ['SCHEDULED', 'TIMED'].includes(row.status ?? '');
           });
 
-    return selectedRows.slice(0, limit).map((row) => ({
+    const safeLimit = Number.isFinite(Number(limit)) ? Math.max(0, Math.min(100, Math.trunc(Number(limit)))) : 3;
+    return selectedRows.slice(0, safeLimit).map((row) => ({
       id: row.id,
       home: row.homeTeam?.name ?? 'Home team',
       away: row.awayTeam?.name ?? 'Away team',
@@ -134,7 +134,7 @@ export class ApiFootballProvider extends SportsDataProvider {
         ? `${row.score.fullTime.home}-${row.score.fullTime.away}`
         : null,
       status: row.status ?? 'Scheduled',
-      elapsed: row.minutes ?? null,
+      elapsed: row.minute ?? null,
       source: 'api-football'
     }));
   }
@@ -153,8 +153,8 @@ export class ApiFootballProvider extends SportsDataProvider {
 
   async getLeagueTable({ league } = {}) {
     const competition = await this.resolveLeagueId(league || 'Premier League');
-    const rows = await this.request(`competitions/${competition}/standings`, {});
-    const standings = Array.isArray(rows) ? rows : (rows?.standings ?? []);
+    const response = await this.request(`competitions/${competition}/standings`, {}, { allowObject: true });
+    const standings = Array.isArray(response) ? response : (response?.standings ?? []);
     const table = standings.flatMap((entry) => Array.isArray(entry.table) ? entry.table : []);
 
     return table.map((row) => ({
@@ -178,12 +178,9 @@ export class ApiFootballProvider extends SportsDataProvider {
     }
 
     const competition = await this.resolveLeagueId(league);
-    const rows = await this.request(`competitions/${competition}/matches`, {
-      season: year,
-      dateFrom: `${year}-01-01`,
-      dateTo: `${year}-12-31`
-    });
-
+    // The v4 season parameter is the season's starting year. Date bounds based
+    // on calendar years would incorrectly omit the second half of a season.
+    const rows = await this.request(`competitions/${competition}/matches`, { season: year });
     return rows.map((row) => ({
       id: row.id,
       home: row.homeTeam?.name ?? '',

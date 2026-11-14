@@ -20,9 +20,10 @@ const envSchema = z.object({
   WHATSAPP_API_VERSION: z.string().default('v19.0'),
   MESSAGING_PROVIDER: z.enum(['mock', 'whatsapp-cloud']).default('mock'),
   SPORTS_DATA_PROVIDER: z.enum(['mock', 'api-football']).default('mock'),
-  SPORTS_API_BASE_URL: z.string().url().default('https://v3.football.api-sports.io'),
+  SPORTS_API_BASE_URL: z.string().url().default('https://api.football-data.org/v4'),
   SPORTS_API_KEY: z.string().optional().default(''),
-  SPORTS_API_LEAGUE_ID: z.string().default('39'),
+  FOOTBALL_DATA_API_KEY: z.string().optional().default(''),
+  SPORTS_API_LEAGUE_ID: z.string().default('PL'),
   SPORTS_API_SEASON: z.coerce.number().int().min(2000).default(new Date().getFullYear()),
   OPENAI_API_KEY: z.string().optional().default(''),
   OPENAI_MODEL: z.string().default('gpt-4.1-mini'),
@@ -66,6 +67,9 @@ export function validateEnvironment() {
   if (env.NODE_ENV === 'production') {
     if (env.MESSAGING_PROVIDER !== 'whatsapp-cloud') issues.push('MESSAGING_PROVIDER must be whatsapp-cloud in production');
     if (env.SPORTS_DATA_PROVIDER !== 'api-football') issues.push('SPORTS_DATA_PROVIDER must be api-football in production');
+    if (!String(env.SPORTS_API_KEY || env.FOOTBALL_DATA_API_KEY || '').trim()) {
+      issues.push('FOOTBALL_DATA_API_KEY (or legacy SPORTS_API_KEY)');
+    }
     if (isPlaceholder(env.WHATSAPP_TOKEN)) issues.push('WHATSAPP_TOKEN');
     if (isPlaceholder(env.WHATSAPP_PHONE_NUMBER_ID)) issues.push('WHATSAPP_PHONE_NUMBER_ID');
     if (isPlaceholder(env.WHATSAPP_WEBHOOK_VERIFY_TOKEN)) issues.push('WHATSAPP_WEBHOOK_VERIFY_TOKEN');
@@ -90,7 +94,7 @@ export function validateEnvironment() {
     redisConfigured: Boolean(env.REDIS_URL),
     messagingProvider: env.MESSAGING_PROVIDER,
     sportsDataProvider: env.SPORTS_DATA_PROVIDER,
-    sportsApiConfigured: Boolean(env.SPORTS_API_KEY),
+    sportsApiConfigured: Boolean(String(env.SPORTS_API_KEY || env.FOOTBALL_DATA_API_KEY || '').trim()),
     aiAnalysisConfigured: Boolean(env.OPENAI_API_KEY),
     adminDashboardConfigured: !isPlaceholder(env.ADMIN_API_KEY),
     dailyRequestLimits: {
