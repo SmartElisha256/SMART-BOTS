@@ -86,6 +86,6 @@ test('unsupported v4 team data is explicit instead of fabricated', async () => {
   assert.equal((await provider.getTeamAvailability('Arsenal')).status, 'unsupported');
   assert.equal((await provider.getTeamStrength('Arsenal')).status, 'unsupported');
   assert.equal((await provider.getLineupContext('Arsenal', 'Chelsea')).status, 'unsupported');
-  assert.equal(await provider.getTeamFormStats('Arsenal'), []);
+  assert.deepEqual(await provider.getTeamFormStats('Arsenal'), []);
   assert.equal(await provider.getHeadToHeadRecord('Arsenal', 'Chelsea'), null);
 });
