@@ -3,6 +3,12 @@ import { SportsDataProvider } from './sportsDataProvider.js';
 
 const API_BASE = (env.SPORTS_API_BASE_URL || 'https://api.football-data.org/v4').replace(/\/$/, '');
 const FINISHED_STATUSES = new Set(['FT', 'AET', 'PEN', 'FINISHED']);
+
+// Free plan is 10 req/min; stay slightly under to reduce 429s under concurrent load.
+const DEFAULT_MAX_REQUESTS_PER_MINUTE = 8;
+const DEFAULT_RATE_WINDOW_MS = 60_000;
+const DEFAULT_RETRY_AFTER_MS = 6_000;
+
 const LEAGUE_CODES = new Map([
   ['premier league', 'PL'],
   ['english premier league', 'PL'],
@@ -46,16 +52,53 @@ function shiftDate(date, days) {
   return kampalaDate(shifted);
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export class ApiFootballProvider extends SportsDataProvider {
-  constructor({ fetchImpl = fetch, apiKey = env.SPORTS_API_KEY || env.FOOTBALL_DATA_API_KEY, apiBaseUrl = API_BASE } = {}) {
+  constructor({
+    fetchImpl = fetch,
+    apiKey = env.SPORTS_API_KEY || env.FOOTBALL_DATA_API_KEY,
+    apiBaseUrl = API_BASE,
+    maxRequestsPerMinute = DEFAULT_MAX_REQUESTS_PER_MINUTE,
+    rateWindowMs = DEFAULT_RATE_WINDOW_MS
+  } = {}) {
     super();
     this.fetchImpl = fetchImpl;
     this.apiKey = apiKey;
     this.apiBaseUrl = apiBaseUrl.replace(/\/$/, '');
+    this.maxRequestsPerMinute = Math.max(1, Number(maxRequestsPerMinute) || DEFAULT_MAX_REQUESTS_PER_MINUTE);
+    this.rateWindowMs = Math.max(1000, Number(rateWindowMs) || DEFAULT_RATE_WINDOW_MS);
+    this._requestTimestamps = [];
   }
 
-  async request(path, params = {}, { allowObject = false } = {}) {
+  /**
+   * Sliding-window throttle: keep at most maxRequestsPerMinute inside the window.
+   * Throws a clear error instead of silently delaying (WhatsApp UX prefers fast feedback).
+   */
+  async _acquireRateSlot() {
+    const now = Date.now();
+    this._requestTimestamps = this._requestTimestamps.filter((ts) => now - ts < this.rateWindowMs);
+
+    if (this._requestTimestamps.length >= this.maxRequestsPerMinute) {
+      const oldest = this._requestTimestamps[0];
+      const waitMs = this.rateWindowMs - (now - oldest);
+      const waitSec = Math.max(1, Math.ceil(waitMs / 1000));
+      const err = new Error(
+        `Sports data is temporarily rate-limited. Please try again in about ${waitSec} second${waitSec === 1 ? '' : 's'}.`
+      );
+      err.code = 'SPORTS_RATE_LIMIT';
+      throw err;
+    }
+
+    this._requestTimestamps.push(now);
+  }
+
+  async request(path, params = {}, { allowObject = false, _retried = false } = {}) {
     if (!this.apiKey) throw new Error('FOOTBALL_DATA_API_KEY or SPORTS_API_KEY is not configured');
+
+    await this._acquireRateSlot();
 
     const url = new URL(`${this.apiBaseUrl}/${path.replace(/^\//, '')}`);
     for (const [key, value] of Object.entries(params)) {
@@ -67,18 +110,30 @@ export class ApiFootballProvider extends SportsDataProvider {
       signal: AbortSignal.timeout(10000)
     });
 
-    if (!response.ok) {
-      if (response.status === 429) {
-        const retryAfter = response.headers.get('Retry-After') || response.headers.get('X-RequestCounter-Reset') || '';
-        const err = new Error(
-          retryAfter
-            ? `Football data rate limit reached. Try again in about ${retryAfter} seconds.`
-            : 'Football data rate limit reached. Live fixtures/table are briefly unavailable; ANALYZE still works.'
-        );
-        err.code = 'SPORTS_RATE_LIMIT';
-        err.status = 429;
-        throw err;
+    const available = response.headers?.get?.('X-RequestsAvailable');
+    const resetSec = response.headers?.get?.('X-RequestCounter-Reset');
+
+    if (response.status === 429) {
+      const retryAfterHeader = response.headers?.get?.('Retry-After');
+      const retryAfterMs = retryAfterHeader
+        ? Math.min(30_000, Math.max(1000, Number(retryAfterHeader) * 1000 || DEFAULT_RETRY_AFTER_MS))
+        : (resetSec ? Math.min(30_000, Math.max(1000, Number(resetSec) * 1000 || DEFAULT_RETRY_AFTER_MS)) : DEFAULT_RETRY_AFTER_MS);
+
+      if (!_retried) {
+        await sleep(retryAfterMs);
+        return this.request(path, params, { allowObject, _retried: true });
       }
+
+      const waitSec = Math.max(1, Math.ceil(retryAfterMs / 1000));
+      const err = new Error(
+        `Sports data is temporarily rate-limited by the provider. Please try again in about ${waitSec} second${waitSec === 1 ? '' : 's'}.`
+      );
+      err.code = 'SPORTS_RATE_LIMIT';
+      err.status = 429;
+      throw err;
+    }
+
+    if (!response.ok) {
       if (response.status === 403 || response.status === 401) {
         const err = new Error('Football data API key is missing or rejected. Set FOOTBALL_DATA_API_KEY (free at football-data.org).');
         err.code = 'SPORTS_AUTH';
@@ -91,7 +146,18 @@ export class ApiFootballProvider extends SportsDataProvider {
     const body = await response.json();
     if (body?.error || body?.errorCode) {
       const message = body.message || body.error?.message || body.error || 'unknown error';
+      if (String(message).toLowerCase().includes('rate') || body.errorCode === 429) {
+        const err = new Error(
+          'Sports data is temporarily rate-limited by the provider. Please try again in about a minute.'
+        );
+        err.code = 'SPORTS_RATE_LIMIT';
+        throw err;
+      }
       throw new Error(`Football Data API rejected the request: ${message}`);
+    }
+
+    if (available != null || resetSec != null) {
+      // soft quota headers available for future logging
     }
 
     if (Array.isArray(body.matches)) return body.matches;
