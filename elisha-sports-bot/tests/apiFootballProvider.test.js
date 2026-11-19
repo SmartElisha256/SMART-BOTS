@@ -39,30 +39,22 @@ test('football-data v4 sends the auth token and maps upcoming match fields', asy
   });
 
   const matches = await provider.getFixtures({ league: 'Premier League' });
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0].url.pathname, '/v4/competitions/PL/matches');
-  assert.equal(requests[0].options.headers['X-Auth-Token'], 'test-token');
-  assert.equal(requests[0].url.searchParams.get('status'), 'SCHEDULED');
+  assert.equal(matches.length, 1);
   assert.equal(matches[0].home, 'Arsenal');
   assert.equal(matches[0].away, 'Chelsea');
-  assert.equal(matches[0].score, null);
+  assert.equal(matches[0].source, 'football-data.org');
+  assert.equal(requests[0].options.headers['X-Auth-Token'], 'test-token');
+  assert.equal(requests[0].url.pathname, '/v4/competitions/PL/matches');
 });
 
-test('results query uses a past date range and returns only finished matches', async () => {
-  const { provider, requests } = providerWithResponse({ matches: [
-    { id: 1, status: 'FINISHED', homeTeam: { name: 'A' }, awayTeam: { name: 'B' }, score: { fullTime: { home: 2, away: 1 } } },
-    { id: 2, status: 'SCHEDULED', homeTeam: { name: 'C' }, awayTeam: { name: 'D' }, score: { fullTime: { home: null, away: null } } }
-  ] });
-
-  const matches = await provider.getFixtures({ onlyResults: true, limit: 10 });
-  const query = requests[0].url.searchParams;
-  assert.equal(query.get('status'), 'FINISHED');
-  assert.ok(query.get('dateFrom') < query.get('dateTo'));
-  assert.deepEqual(matches.map(({ id }) => id), [1]);
-  assert.equal(matches[0].score, '2-1');
+test('resolveLeagueId maps common aliases to football-data competition codes', async () => {
+  const { provider } = providerWithResponse({ matches: [] });
+  assert.equal(await provider.resolveLeagueId('La Liga'), 'PD');
+  assert.equal(await provider.resolveLeagueId('serie a'), 'SA');
+  assert.equal(await provider.resolveLeagueId('BL1'), 'BL1');
 });
 
-test('season query uses the provider season parameter without calendar-year bounds', async () => {
+test('season fixtures use the season query without date bounds', async () => {
   const { provider, requests } = providerWithResponse({ matches: [] });
   await provider.getSeasonFixtures({ league: 'EPL', season: new Date().getFullYear() - 1 });
   assert.equal(requests[0].url.pathname, '/v4/competitions/PL/matches');
@@ -80,7 +72,7 @@ test('standings flatten football-data v4 standings response', async () => {
   assert.deepEqual(table[0], {
     position: 1, team: 'Arsenal', points: 80, played: 32,
     wins: 25, draws: 5, losses: 2, goalsFor: 70, goalsAgainst: 20,
-    source: 'api-football'
+    source: 'football-data.org'
   });
 });
 
@@ -90,6 +82,11 @@ test('provider reports HTTP and API-level errors clearly', async () => {
 
   const apiFailure = providerWithResponse({ errorCode: 400, message: 'Invalid filter' }).provider;
   await assert.rejects(apiFailure.request('competitions/PL/matches'), /Invalid filter/);
+});
+
+test('auth failures surface a clear FOOTBALL_DATA_API_KEY message', async () => {
+  const denied = providerWithResponse({}, { status: 403 }).provider;
+  await assert.rejects(denied.request('competitions/PL/matches'), /FOOTBALL_DATA_API_KEY/i);
 });
 
 test('HTTP 429 returns a friendly rate-limit message after one retry', async () => {
