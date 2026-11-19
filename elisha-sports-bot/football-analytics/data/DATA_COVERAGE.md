@@ -2,60 +2,66 @@
 
 Bundled CSV seasons (English Premier League, football-data.co.uk style):
 
-| File | Season |
-|------|--------|
-| `epl_2020_21.csv` | 2020/21 |
-| `epl_2021_22.csv` | 2021/22 |
-| `epl_2022_23.csv` | 2022/23 |
-| `epl_2023_24.csv` | 2023/24 |
-| `epl_2024_25.csv` | 2024/25 |
-| `epl_2025_26.csv` | 2025/26 (complete) |
-| `epl_2026_27.csv` | 2026/27 (partial — through early Nov 2026) |
+| File | Season | Coverage |
+|------|--------|----------|
+| epl_2020_21.csv | 2020/21 | Historical season |
+| epl_2021_22.csv | 2021/22 | Historical season |
+| epl_2022_23.csv | 2022/23 | Historical season |
+| epl_2023_24.csv | 2023/24 | Historical season |
+| epl_2024_25.csv | 2024/25 | Historical season |
+| epl_2025_26.csv | 2025/26 | Historical season |
+| epl_2026_27.csv | 2026/27 | Partial season; not complete |
 
-This is **not** automatically current for unfinished seasons or the live calendar.
+The last committed data/dataset_metadata.json reports 2,380 combined records from
+2020-09-12 through 2026-11-08. This count and date range describe that metadata snapshot;
+regenerate the metadata after any refresh. The data is historical and is not a live feed.
 
-## Columns the bot uses
+## Columns used by the existing EPL pipeline
 
-### Mandatory (season CSV must include these)
-
-| Column | Meaning |
-|--------|---------|
-| `Date` | Match date (`DD/MM/YYYY`) — needed for chronological features |
-| `HomeTeam` | Home team name |
-| `AwayTeam` | Away team name |
-| `FTHG` | Full-time home goals |
-| `FTAG` | Full-time away goals |
-
-Without these five, `prepare_epl_data.py` rejects the file.
-
-### Optional extras (shots / corners / fouls / cards)
-
-Used when present to enrich rolling form features; safe to omit:
+### Mandatory season CSV columns
 
 | Column | Meaning |
-|--------|---------|
-| `HS` / `AS` | Home / away shots |
-| `HST` / `AST` | Home / away shots on target |
-| `HC` / `AC` | Home / away corners |
-| `HF` / `AF` | Home / away fouls |
-| `HY` / `AY` | Home / away yellow cards |
-| `HR` / `AR` | Home / away red cards |
+|---------|---------|
+| Date | Match date (DD/MM/YYYY) |
+| HomeTeam | Home team name |
+| AwayTeam | Away team name |
+| FTHG | Full-time home goals |
+| FTAG | Full-time away goals |
 
-### Not used by the bot
+### Optional match statistics
 
-Odds columns (`B365*`, `PS*`, Asian handicap, over/under, etc.), half-time scores (`HTHG`, `HTAG`, `HTR`), `Div`, `Time`, and `Referee` are ignored by train/predict.
+| Column | Meaning |
+|---------|---------|
+| HS / AS | Home / away shots |
+| HST / AST | Home / away shots on target |
+| HC / AC | Home / away corners |
+| HF / AF | Home / away fouls |
+| HY / AY | Home / away yellow cards |
+| HR / AR | Home / away red cards |
+
+Optional statistics are not guaranteed to be present for every competition or season.
+Missing values must remain missing and must not be interpreted as zero.
+
+## Global data foundation
+
+The new global_dataset.py validator uses a separate canonical schema for multi-competition
+imports. It requires stable match, competition and team IDs, source, season, timestamp,
+completed status and final score. It also checks duplicate IDs, duplicate fixtures,
+synthetic rows, invalid scores and optional-stat coverage.
+
+See GLOBAL_DATA_ARCHITECTURE.md for the schema and staged rollout. The global dataset is
+not automatically merged into the existing EPL model.
 
 ## Update workflow
 
-```bash
-cd elisha-sports-bot/football-analytics
-# Optional licensed HTTPS CSV (requires FOOTBALL_RESULTS_CSV_URL + FOOTBALL_RESULTS_LICENSE_CONFIRMED=true)
-python3 fetch_matches.py
-# Rebuild normalized history (discovers all epl_YYYY_YY.csv present)
-python3 prepare_epl_data.py
-# Or one shot:
-python3 update_pipeline.py --train --evaluate
-```
+    cd elisha-sports-bot/football-analytics
+    python3 prepare_epl_data.py
+    python3 audit_data.py --data data/epl_historical.csv
+    python3 update_pipeline.py --train --evaluate
 
-`synthetic_matches.csv` and `unit_test_historical_mini.csv` are for tests only.
-`train.py` refuses synthetic rows.
+The optional provider CSV fetcher requires FOOTBALL_RESULTS_CSV_URL and
+FOOTBALL_RESULTS_LICENSE_CONFIRMED=true. It is a generic HTTPS CSV adapter, not a named
+provider integration. Verify the source, licence, completeness and date coverage yourself.
+
+synthetic_matches.csv and unit_test_historical_mini.csv are for tests only.
+train.py refuses synthetic rows.
