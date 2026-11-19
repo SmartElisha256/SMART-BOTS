@@ -4,7 +4,6 @@ import { SportsDataProvider } from './sportsDataProvider.js';
 const API_BASE = (env.SPORTS_API_BASE_URL || 'https://api.football-data.org/v4').replace(/\/$/, '');
 const FINISHED_STATUSES = new Set(['FT', 'AET', 'PEN', 'FINISHED']);
 
-// Free plan is 10 req/min; stay slightly under to reduce 429s under concurrent load.
 const DEFAULT_MAX_REQUESTS_PER_MINUTE = 8;
 const DEFAULT_RATE_WINDOW_MS = 60_000;
 const DEFAULT_RETRY_AFTER_MS = 6_000;
@@ -73,10 +72,6 @@ export class ApiFootballProvider extends SportsDataProvider {
     this._requestTimestamps = [];
   }
 
-  /**
-   * Sliding-window throttle: keep at most maxRequestsPerMinute inside the window.
-   * Throws a clear error instead of silently delaying (WhatsApp UX prefers fast feedback).
-   */
   async _acquireRateSlot() {
     const now = Date.now();
     this._requestTimestamps = this._requestTimestamps.filter((ts) => now - ts < this.rateWindowMs);
@@ -85,9 +80,11 @@ export class ApiFootballProvider extends SportsDataProvider {
       const oldest = this._requestTimestamps[0];
       const waitMs = this.rateWindowMs - (now - oldest);
       const waitSec = Math.max(1, Math.ceil(waitMs / 1000));
-      throw new Error(
+      const err = new Error(
         `Sports data is temporarily rate-limited. Please try again in about ${waitSec} second${waitSec === 1 ? '' : 's'}.`
       );
+      err.code = 'SPORTS_RATE_LIMIT';
+      throw err;
     }
 
     this._requestTimestamps.push(now);
@@ -108,7 +105,6 @@ export class ApiFootballProvider extends SportsDataProvider {
       signal: AbortSignal.timeout(10000)
     });
 
-    // Respect provider-reported remaining quota when present (best-effort).
     const available = response.headers?.get?.('X-RequestsAvailable');
     const resetSec = response.headers?.get?.('X-RequestCounter-Reset');
 
@@ -124,30 +120,35 @@ export class ApiFootballProvider extends SportsDataProvider {
       }
 
       const waitSec = Math.max(1, Math.ceil(retryAfterMs / 1000));
-      throw new Error(
+      const err = new Error(
         `Sports data is temporarily rate-limited by the provider. Please try again in about ${waitSec} second${waitSec === 1 ? '' : 's'}.`
       );
+      err.code = 'SPORTS_RATE_LIMIT';
+      err.status = 429;
+      throw err;
     }
 
     if (!response.ok) {
+      if (response.status === 403 || response.status === 401) {
+        const err = new Error('Football data API key is missing or rejected. Set FOOTBALL_DATA_API_KEY (free at football-data.org).');
+        err.code = 'SPORTS_AUTH';
+        err.status = response.status;
+        throw err;
+      }
       throw new Error(`Football Data API returned HTTP ${response.status}`);
     }
 
     const body = await response.json();
     if (body?.error || body?.errorCode) {
       const message = body.message || body.error?.message || body.error || 'unknown error';
-      // Some plans return rate-limit details in the body with a non-429 status.
       if (String(message).toLowerCase().includes('rate') || body.errorCode === 429) {
-        throw new Error(
+        const err = new Error(
           'Sports data is temporarily rate-limited by the provider. Please try again in about a minute.'
         );
+        err.code = 'SPORTS_RATE_LIMIT';
+        throw err;
       }
       throw new Error(`Football Data API rejected the request: ${message}`);
-    }
-
-    // Attach soft quota hints for optional upstream logging (non-enumerable).
-    if (available != null || resetSec != null) {
-      // no-op storage; callers can extend later if needed
     }
 
     if (Array.isArray(body.matches)) return body.matches;
@@ -161,16 +162,11 @@ export class ApiFootballProvider extends SportsDataProvider {
     const value = String(leagueName ?? '').trim();
     const normalized = value.toLowerCase().replace(/\s+/g, ' ');
     if (!normalized) return env.SPORTS_API_LEAGUE_ID || 'PL';
-
-    // API-Football numeric league IDs are not valid competition codes in v4.
     if (/^\d+$/.test(value)) return env.SPORTS_API_LEAGUE_ID || 'PL';
-
     const direct = LEAGUE_CODES.get(normalized);
     if (direct) return direct;
-
     const code = value.toUpperCase();
     if (code.length <= 8 && /^[A-Z0-9]+$/.test(code)) return code;
-
     return env.SPORTS_API_LEAGUE_ID || 'PL';
   }
 
@@ -181,11 +177,9 @@ export class ApiFootballProvider extends SportsDataProvider {
       dateFrom: onlyResults ? shiftDate(new Date(), -30) : today,
       dateTo: liveOnly || onlyResults ? today : shiftDate(new Date(), 14)
     };
-
     if (liveOnly) params.status = 'LIVE';
     else if (onlyResults) params.status = 'FINISHED';
     else params.status = 'SCHEDULED';
-
     const rows = await this.request(`competitions/${competition}/matches`, params);
     const selectedRows = liveOnly
       ? rows.filter((row) => ['IN_PLAY', 'PAUSED', 'LIVE'].includes(row.status ?? ''))
@@ -196,7 +190,6 @@ export class ApiFootballProvider extends SportsDataProvider {
             return Number.isFinite(kickoff) && kickoff >= Date.now() &&
               ['SCHEDULED', 'TIMED'].includes(row.status ?? '');
           });
-
     const safeLimit = Number.isFinite(Number(limit)) ? Math.max(0, Math.min(100, Math.trunc(Number(limit)))) : 3;
     return selectedRows.slice(0, safeLimit).map((row) => ({
       id: row.id,
@@ -208,28 +201,19 @@ export class ApiFootballProvider extends SportsDataProvider {
         : null,
       status: row.status ?? 'Scheduled',
       elapsed: row.minute ?? null,
-      source: 'api-football'
+      source: 'football-data.org'
     }));
   }
 
-  async findTeam() {
-    return null;
-  }
-
-  async getTeamFormStats() {
-    return [];
-  }
-
-  async getHeadToHeadRecord() {
-    return null;
-  }
+  async findTeam() { return null; }
+  async getTeamFormStats() { return []; }
+  async getHeadToHeadRecord() { return null; }
 
   async getLeagueTable({ league } = {}) {
     const competition = await this.resolveLeagueId(league || 'Premier League');
     const response = await this.request(`competitions/${competition}/standings`, {}, { allowObject: true });
     const standings = Array.isArray(response) ? response : (response?.standings ?? []);
     const table = standings.flatMap((entry) => Array.isArray(entry.table) ? entry.table : []);
-
     return table.map((row) => ({
       position: row.position,
       team: row.team?.name ?? 'Unknown team',
@@ -240,7 +224,7 @@ export class ApiFootballProvider extends SportsDataProvider {
       losses: row.lost ?? 0,
       goalsFor: row.goalsFor ?? 0,
       goalsAgainst: row.goalsAgainst ?? 0,
-      source: 'api-football'
+      source: 'football-data.org'
     }));
   }
 
@@ -249,10 +233,7 @@ export class ApiFootballProvider extends SportsDataProvider {
     if (!Number.isInteger(year) || year < 2000 || year > new Date().getFullYear()) {
       throw new Error('Season must be a year from 2000 through the current year');
     }
-
     const competition = await this.resolveLeagueId(league);
-    // The v4 season parameter is the season's starting year. Date bounds based
-    // on calendar years would incorrectly omit the second half of a season.
     const rows = await this.request(`competitions/${competition}/matches`, { season: year });
     return rows.map((row) => ({
       id: row.id,
@@ -262,34 +243,23 @@ export class ApiFootballProvider extends SportsDataProvider {
       awayGoals: row.score?.fullTime?.away ?? null,
       status: row.status ?? '',
       date: row.utcDate,
-      source: 'api-football'
+      source: 'football-data.org'
     }));
   }
 
   async getTeamAvailability(teamName) {
-    return {
-      team: teamName,
-      status: 'unsupported',
-      injuries: [],
-      source: 'api-football',
-      note: 'This provider does not expose team injury or availability data via the v4 API.'
-    };
+    return { team: teamName, status: 'unsupported', injuries: [], source: 'football-data.org',
+      note: 'This provider does not expose team injury or availability data via the v4 API.' };
   }
 
   async getTeamStrength() {
-    return {
-      status: 'unsupported',
-      source: 'api-football',
-      note: 'This provider does not expose team-strength statistics in the v4 API.'
-    };
+    return { status: 'unsupported', source: 'football-data.org',
+      note: 'This provider does not expose team-strength statistics in the v4 API.' };
   }
 
   async getLineupContext() {
-    return {
-      status: 'unsupported',
-      source: 'api-football',
-      note: 'This provider does not expose lineup data in the v4 API.'
-    };
+    return { status: 'unsupported', source: 'football-data.org',
+      note: 'This provider does not expose lineup data in the v4 API.' };
   }
 
   async getTeamSummary(teamName) {
