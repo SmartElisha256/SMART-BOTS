@@ -14,7 +14,6 @@ export async function handleFixturesCommand(args) {
       if (String(asNum) === raw && asNum >= 1) {
         limit = Math.min(asNum, 10);
       } else {
-        // e.g. "La Liga" or "5 La Liga"
         const m = raw.match(/^(\d+)\s+(.+)$/);
         if (m) {
           limit = Math.min(parseInt(m[1], 10) || 3, 10);
@@ -43,12 +42,22 @@ export async function handleFixturesCommand(args) {
       })
       .join('\n\n');
 
-    return fixtures[0]?.source === 'api-football'
-      ? `📅 UPCOMING FIXTURES — ${league}\n\n${list}\n\nSource: football data API`
+    const liveSource = fixtures[0]?.source === 'football-data.org' || fixtures[0]?.source === 'api-football';
+    const staleNote = fixtures[0]?.degraded
+      ? '\n\n⚠️ Showing last cached data (provider busy or rate-limited).'
+      : '';
+    return liveSource
+      ? `📅 UPCOMING FIXTURES — ${league}\n\n${list}${staleNote}\n\nSource: football-data.org (cached)`
       : `⚠️ DEMO DATA — not live or official\n\n📅 SAMPLE FIXTURES — ${league}\n\n${list}`;
   } catch (error) {
     logger.error({ error }, 'Error fetching fixtures');
-    return 'Could not fetch fixtures. Please try again.';
+    if (error?.code === 'SPORTS_RATE_LIMIT' || /rate limit/i.test(String(error?.message || ''))) {
+      return 'Live football data is busy (free API limit). Try again in a couple of minutes.\nANALYZE TeamA vs TeamB still works from local ML.';
+    }
+    if (error?.code === 'SPORTS_AUTH') {
+      return 'Football data is not configured yet. The admin needs a free FOOTBALL_DATA_API_KEY from football-data.org.\nANALYZE still works from local models.';
+    }
+    return 'Could not fetch that right now. Please try again shortly. ANALYZE still works offline from local ML.';
   }
 }
 
@@ -76,7 +85,13 @@ export async function handleLiveCommand(args) {
     return `🔴 LIVE MATCHES\n\n${list}`;
   } catch (error) {
     logger.error({ error }, 'Error fetching live scores');
-    return 'Could not fetch live scores. Please try again.';
+    if (error?.code === 'SPORTS_RATE_LIMIT' || /rate limit/i.test(String(error?.message || ''))) {
+      return 'Live football data is busy (free API limit). Try again in a couple of minutes.\nANALYZE TeamA vs TeamB still works from local ML.';
+    }
+    if (error?.code === 'SPORTS_AUTH') {
+      return 'Football data is not configured yet. The admin needs a free FOOTBALL_DATA_API_KEY from football-data.org.\nANALYZE still works from local models.';
+    }
+    return 'Could not fetch that right now. Please try again shortly. ANALYZE still works offline from local ML.';
   }
 }
 
@@ -95,12 +110,22 @@ export async function handleTableCommand(args) {
       )
       .join('\n');
 
-    return table[0]?.source === 'api-football'
-      ? `📊 LEAGUE TABLE - ${league}\n\n${list}\n\nSource: football data API`
+    const liveSource = table[0]?.source === 'football-data.org' || table[0]?.source === 'api-football';
+    const staleNote = table[0]?.degraded
+      ? '\n\n⚠️ Showing last cached standings (provider busy or rate-limited).'
+      : '';
+    return liveSource
+      ? `📊 LEAGUE TABLE - ${league}\n\n${list}${staleNote}\n\nSource: football-data.org (cached)`
       : `⚠️ DEMO DATA — not live or official\n\n📊 SAMPLE LEAGUE TABLE - ${league}\n\n${list}`;
   } catch (error) {
     logger.error({ error }, 'Error fetching table');
-    return 'Could not fetch standings. Please try again.';
+    if (error?.code === 'SPORTS_RATE_LIMIT' || /rate limit/i.test(String(error?.message || ''))) {
+      return 'Live football data is busy (free API limit). Try again in a couple of minutes.\nANALYZE TeamA vs TeamB still works from local ML.';
+    }
+    if (error?.code === 'SPORTS_AUTH') {
+      return 'Football data is not configured yet. The admin needs a free FOOTBALL_DATA_API_KEY from football-data.org.\nANALYZE still works from local models.';
+    }
+    return 'Could not fetch that right now. Please try again shortly. ANALYZE still works offline from local ML.';
   }
 }
 
