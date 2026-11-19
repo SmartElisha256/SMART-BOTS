@@ -1,18 +1,18 @@
 import { env } from '../../config/env.js';
-import { mockSportsProvider } from './mockSportsProvider.js';
+import { MockSportsDataProvider } from './mockSportsDataProvider.js';
 import { ApiFootballProvider } from './apiFootballProvider.js';
 
 let provider;
 export function getSportsDataProvider() {
   if (provider) return provider;
-  if (env.SPORTS_DATA_PROVIDER === 'api-football') {
+  if (env.SPORTS_DATA_PROVIDER === 'api-football' || env.SPORTS_DATA_PROVIDER === 'football-data') {
     provider = new ApiFootballProvider();
     return provider;
   }
-  return mockSportsProvider;
+  provider = new MockSportsDataProvider();
+  return provider;
 }
 
-// Tests can inject a provider without requiring external API credentials.
-export function setSportsDataProviderForTests(nextProvider) {
-  provider = nextProvider;
+export function resetSportsDataProvider() {
+  provider = undefined;
 }

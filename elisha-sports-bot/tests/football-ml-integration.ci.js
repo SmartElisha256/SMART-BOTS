@@ -15,8 +15,6 @@ test('Node service invokes the real Python model and formats a safe prediction r
   assert.ok(prediction.expected_goals);
   assert.ok(prediction.markets_meta?.poisson_grid);
 
-  // Status depends on how recent the trained CSV history is relative to kickoff.
-  // Fresh history → ok/limited; history older than ~90 days relative to cutoff → stale.
   const dqStatus = prediction.data_quality?.status;
   assert.ok(
     ['ok', 'limited', 'stale', 'synthetic', 'unvalidated'].includes(dqStatus),
