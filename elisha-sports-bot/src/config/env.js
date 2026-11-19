@@ -19,15 +19,16 @@ const envSchema = z.object({
   WHATSAPP_APP_SECRET: z.string().optional().default(''),
   WHATSAPP_API_VERSION: z.string().default('v19.0'),
   MESSAGING_PROVIDER: z.enum(['mock', 'whatsapp-cloud']).default('mock'),
-  SPORTS_DATA_PROVIDER: z.enum(['mock', 'api-football']).default('mock'),
+  SPORTS_DATA_PROVIDER: z.enum(['mock', 'api-football', 'football-data']).default('mock'),
   SPORTS_API_BASE_URL: z.string().url().default('https://api.football-data.org/v4'),
   SPORTS_API_KEY: z.string().optional().default(''),
   FOOTBALL_DATA_API_KEY: z.string().optional().default(''),
   SPORTS_API_LEAGUE_ID: z.string().default('PL'),
   SPORTS_API_SEASON: z.coerce.number().int().min(2000).default(new Date().getFullYear()),
   OPENAI_API_KEY: z.string().optional().default(''),
-  OPENAI_MODEL: z.string().default('gpt-4.1-mini'),
-  OPENAI_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
+  OPENAI_MODEL: z.string().default('openrouter/free'),
+  OPENAI_BASE_URL: z.string().url().default('https://openrouter.ai/api/v1'),
+  OPENAI_API_STYLE: z.enum(['auto', 'chat', 'responses']).default('auto'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   CACHE_TTL_FIXTURES: z.coerce.number().int().positive().default(600),
   CACHE_TTL_TABLE: z.coerce.number().int().positive().default(900),
@@ -66,7 +67,9 @@ export function validateEnvironment() {
 
   if (env.NODE_ENV === 'production') {
     if (env.MESSAGING_PROVIDER !== 'whatsapp-cloud') issues.push('MESSAGING_PROVIDER must be whatsapp-cloud in production');
-    if (env.SPORTS_DATA_PROVIDER !== 'api-football') issues.push('SPORTS_DATA_PROVIDER must be api-football in production');
+    if (!['api-football', 'football-data'].includes(env.SPORTS_DATA_PROVIDER)) {
+      issues.push('SPORTS_DATA_PROVIDER must be api-football or football-data in production (use football-data.org free key)');
+    }
     if (!String(env.SPORTS_API_KEY || env.FOOTBALL_DATA_API_KEY || '').trim()) {
       issues.push('FOOTBALL_DATA_API_KEY (or legacy SPORTS_API_KEY)');
     }
@@ -78,7 +81,7 @@ export function validateEnvironment() {
     if (isPlaceholder(env.MOMO_MERCHANT_CODE) || isPlaceholder(env.MOMO_MERCHANT_NAME) || !env.MOMO_NETWORK) issues.push('MOMO_NETWORK / MOMO_MERCHANT_CODE / MOMO_MERCHANT_NAME');
     if (!String(env.PAYMENT_ADMIN_PHONES || '').trim()) issues.push('PAYMENT_ADMIN_PHONES');
     if (!env.ADMIN_API_KEY || isPlaceholder(env.ADMIN_API_KEY)) issues.push('ADMIN_API_KEY');
-    if (!env.OPENAI_API_KEY) issues.push('OPENAI_API_KEY');
+    // OPENAI_API_KEY is optional: free launch can skip AI chat and still run ANALYZE/ML.
   }
 
   if (issues.length) {
