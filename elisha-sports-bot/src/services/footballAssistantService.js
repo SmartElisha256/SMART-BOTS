@@ -16,7 +16,17 @@ const aiCircuit = createCircuitBreaker({
   logger
 });
 
-function extractResponseText(data) {
+const SYSTEM_PROMPT = [
+  'You are ELISHA SPORTS BOT, a helpful football/soccer assistant for WhatsApp.',
+  'Answer the user\'s actual question clearly and naturally. You may explain football rules, tactics, formations, player roles, historical context, competitions, training concepts, and how football statistics work.',
+  'Keep replies concise, helpful, and easy to read on a phone.',
+  'Do not claim access to live scores, current injuries, lineups, transfers, odds, fixtures, or recent results unless that information was explicitly supplied in the question.',
+  'Never invent statistics, sources, match facts, or probabilities. If the question needs current data, suggest FIXTURES, TABLE, FORM, H2H, or ANALYZE.',
+  'Never guarantee outcomes. Do not present gambling as a way to make money.',
+  'If the question is not about football/soccer, politely explain that you specialize in football.'
+].join(' ');
+
+function extractResponsesApiText(data) {
   return (data.output ?? [])
     .flatMap((item) => item.content ?? [])
     .filter((item) => item.type === 'output_text' && typeof item.text === 'string')
@@ -25,46 +35,74 @@ function extractResponseText(data) {
     .trim();
 }
 
-/**
- * Answers open-ended football questions when an AI provider is configured.
- * Does not pretend to have live data; limits keep cost and WhatsApp size predictable.
- */
+function extractChatCompletionsText(data) {
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content === 'string') return content.trim();
+  if (Array.isArray(content)) {
+    return content
+      .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+      .map((part) => part.text)
+      .join('\n')
+      .trim();
+  }
+  return '';
+}
+
+function useChatCompletions() {
+  const style = String(env.OPENAI_API_STYLE || '').toLowerCase();
+  if (style === 'chat' || style === 'chat_completions') return true;
+  if (style === 'responses') return false;
+  const base = String(env.OPENAI_BASE_URL || '').toLowerCase();
+  return base.includes('openrouter.ai') || base.includes('localhost');
+}
+
 export async function answerFootballQuestion(question) {
   const text = String(question ?? '').trim().slice(0, MAX_QUESTION_LENGTH);
   if (!text) return null;
   if (!env.OPENAI_API_KEY) return null;
 
   return aiCircuit.exec(async () => {
-    const response = await fetch(`${env.OPENAI_BASE_URL.replace(/\/$/, '')}/responses`, {
+    const base = env.OPENAI_BASE_URL.replace(/\/$/, '');
+    const chatMode = useChatCompletions();
+    const url = chatMode ? `${base}/chat/completions` : `${base}/responses`;
+    const body = chatMode
+      ? {
+          model: env.OPENAI_MODEL,
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'user', content: text }
+          ],
+          max_tokens: 350,
+          temperature: 0.4
+        }
+      : {
+          model: env.OPENAI_MODEL,
+          instructions: SYSTEM_PROMPT,
+          input: text,
+          max_output_tokens: 350
+        };
+
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
         authorization: `Bearer ${env.OPENAI_API_KEY}`,
-        'content-type': 'application/json'
+        'content-type': 'application/json',
+        'HTTP-Referer': 'https://github.com/SmartElisha256/SMART-BOTS',
+        'X-Title': 'ELISHA SPORTS BOT'
       },
       signal: AbortSignal.timeout(AI_TIMEOUT_MS),
-      body: JSON.stringify({
-        model: env.OPENAI_MODEL,
-        instructions: [
-          'You are ELISHA SPORTS BOT, a helpful football/soccer assistant for WhatsApp.',
-          'Answer the user’s actual question clearly and naturally. You may explain football rules, tactics, formations, player roles, historical context, competitions, training concepts, and how football statistics work.',
-          'Keep replies concise, helpful, and easy to read on a phone.',
-          'Do not claim access to live scores, current injuries, lineups, transfers, odds, fixtures, or recent results unless that information was explicitly supplied in the question or is available from a connected data tool. This assistant call has no live data feed.',
-          'Never invent statistics, sources, match facts, or probabilities. If the question depends on current or match-specific data you do not have, say so plainly and suggest the user ask for FIXTURES, LIVE, TABLE, FORM [TEAM], H2H [TEAM A] vs [TEAM B], or ANALYZE [TEAM A] vs [TEAM B] where available.',
-          'If asked for a match prediction without reliable match data, explain what information would be needed instead of making up a pick. Never guarantee outcomes.',
-          'If the question is not about football/soccer, politely explain that you specialize in football and invite a football question.',
-          'Do not present gambling as a way to make money or encourage risky betting.'
-        ].join(' '),
-        input: text,
-        max_output_tokens: 350
-      })
+      body: JSON.stringify(body)
     });
 
+    if (response.status === 429) {
+      throw new Error('AI rate limit reached. Try again later or use ANALYZE / MENU commands.');
+    }
     if (!response.ok) {
       throw new Error(`Football AI provider returned HTTP ${response.status}`);
     }
 
     const data = await response.json();
-    const answer = extractResponseText(data);
+    const answer = chatMode ? extractChatCompletionsText(data) : extractResponsesApiText(data);
     if (!answer) return null;
 
     const safeAnswer = answer.slice(0, 3000);
@@ -74,4 +112,8 @@ export async function answerFootballQuestion(question) {
 
 export function getAiCircuitState() {
   return aiCircuit.getState();
+}
+
+export function isAiConfigured() {
+  return Boolean(String(env.OPENAI_API_KEY || '').trim());
 }
