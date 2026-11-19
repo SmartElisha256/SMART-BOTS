@@ -9,6 +9,8 @@ const redis = env.NODE_ENV === 'test' ? null : env.REDIS_URL ? new IORedis(env.R
 }) : null;
 
 const DEFAULT_TTL = 600;
+/** Keep a longer stale copy so rate-limits / outages can still serve last good data. */
+const STALE_MULTIPLIER = 6;
 
 export async function getCached(key) {
   if (!redis) return null;
@@ -22,10 +24,26 @@ export async function getCached(key) {
   }
 }
 
+/** Last successful payload even after primary TTL expired (soft failure path). */
+export async function getStaleCached(key) {
+  if (!redis) return null;
+  try {
+    const data = await redis.get(`${key}:stale`);
+    if (!data) return null;
+    return JSON.parse(data);
+  } catch (error) {
+    logger.warn({ key, error: error.message }, 'Stale cache read error');
+    return null;
+  }
+}
+
 export async function setCached(key, value, ttlSeconds = DEFAULT_TTL) {
   if (!redis) return false;
   try {
-    await redis.setex(key, ttlSeconds, JSON.stringify(value));
+    const ttl = Math.max(1, Number(ttlSeconds) || DEFAULT_TTL);
+    const payload = JSON.stringify(value);
+    await redis.setex(key, ttl, payload);
+    await redis.setex(`${key}:stale`, ttl * STALE_MULTIPLIER, payload);
     return true;
   } catch (error) {
     logger.warn({ key, error: error.message }, 'Cache write error');
@@ -36,7 +54,7 @@ export async function setCached(key, value, ttlSeconds = DEFAULT_TTL) {
 export async function deleteCached(key) {
   if (!redis) return false;
   try {
-    await redis.del(key);
+    await redis.del(key, `${key}:stale`);
     return true;
   } catch (error) {
     logger.warn({ key, error: error.message }, 'Cache delete error');
