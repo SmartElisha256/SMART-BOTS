@@ -8,6 +8,7 @@ function providerWithResponse(payload, { status = 200, headers = {} } = {}) {
   const provider = new ApiFootballProvider({
     apiKey: 'test-token',
     apiBaseUrl: 'https://football-data.test/v4',
+    maxRequestsPerMinute: 100,
     fetchImpl: async (url, options) => {
       requests.push({ url: new URL(url), options });
       return {
@@ -79,9 +80,6 @@ test('provider reports HTTP and API-level errors clearly', async () => {
   const httpFailure = providerWithResponse({}, { status: 500 }).provider;
   await assert.rejects(httpFailure.request('competitions/PL/matches'), /HTTP 500/);
 
-  const rateLimited = providerWithResponse({}, { status: 429 }).provider;
-  await assert.rejects(rateLimited.request('competitions/PL/matches'), /rate limit/i);
-
   const apiFailure = providerWithResponse({ errorCode: 400, message: 'Invalid filter' }).provider;
   await assert.rejects(apiFailure.request('competitions/PL/matches'), /Invalid filter/);
 });
@@ -89,6 +87,57 @@ test('provider reports HTTP and API-level errors clearly', async () => {
 test('auth failures surface a clear FOOTBALL_DATA_API_KEY message', async () => {
   const denied = providerWithResponse({}, { status: 403 }).provider;
   await assert.rejects(denied.request('competitions/PL/matches'), /FOOTBALL_DATA_API_KEY/i);
+});
+
+test('HTTP 429 returns a friendly rate-limit message after one retry', async () => {
+  let calls = 0;
+  const provider = new ApiFootballProvider({
+    apiKey: 'test-token',
+    apiBaseUrl: 'https://football-data.test/v4',
+    maxRequestsPerMinute: 100,
+    fetchImpl: async () => {
+      calls += 1;
+      return {
+        ok: false,
+        status: 429,
+        headers: {
+          get(name) {
+            if (String(name).toLowerCase() === 'retry-after') return '1';
+            return null;
+          }
+        },
+        json: async () => ({})
+      };
+    }
+  });
+
+  await assert.rejects(
+    provider.request('competitions/PL/matches'),
+    /temporarily rate-limited by the provider/i
+  );
+  assert.equal(calls, 2, 'should retry once on 429');
+});
+
+test('client-side rate guard blocks bursts above the per-minute budget', async () => {
+  const provider = new ApiFootballProvider({
+    apiKey: 'test-token',
+    apiBaseUrl: 'https://football-data.test/v4',
+    maxRequestsPerMinute: 2,
+    rateWindowMs: 60_000,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      json: async () => ({ matches: [] })
+    })
+  });
+
+  await provider.request('competitions/PL/matches');
+  await provider.request('competitions/PL/matches');
+  await assert.rejects(
+    provider.request('competitions/PL/matches'),
+    /temporarily rate-limited/i
+  );
 });
 
 test('unsupported v4 team data is explicit instead of fabricated', async () => {
