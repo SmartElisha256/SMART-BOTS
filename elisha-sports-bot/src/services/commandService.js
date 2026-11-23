@@ -17,6 +17,7 @@ import {
   handleLeaguesCommand
 } from '../commands/sportsCommands.js';
 import { runAnalyzeCommand, runTipCommand } from '../commands/analyzeCommand.js';
+import { runValueCommand } from '../commands/valueCommand.js';
 import { addAnalysisJob, isQueueAvailable } from '../jobs/queue.js';
 import { maybeAppendUpgradePrompt } from './conversionService.js';
 import { submitFeedback } from './feedbackService.js';
@@ -159,6 +160,15 @@ export async function processIncomingMessage(input) {
             args: null,
             provider: payload.provider
           });
+          break;
+
+        case 'value':
+        case 'odds':
+          if (!(await hasActivePremiumSubscription(sender))) {
+            reply = premiumRequiredMessage();
+          } else {
+            reply = await runValueCommand({ args, phone: sender });
+          }
           break;
 
         case 'live':
