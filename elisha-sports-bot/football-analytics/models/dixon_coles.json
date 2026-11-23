@@ -1,7 +1,7 @@
 {
-  "rho": -0.01,
+  "rho": 0.01,
   "matches": 380,
-  "calibration_loglik": -1173.3093449377056,
+  "calibration_loglik": -1124.2658878271718,
   "status": "fitted",
   "objective": "normalised_score_loglik",
   "note": "rho is fit only on the calibration window using expected goals from a model trained on earlier matches. It is not fit on the holdout.",

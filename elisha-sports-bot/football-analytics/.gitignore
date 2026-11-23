@@ -6,3 +6,9 @@ __pycache__/
 .pytest_cache/
 .venv/
 *.py[cod]
+betting/*
+!betting/.gitkeep
+data/*_historical.csv
+data/*_dataset_metadata.json
+data/.refresh.lock
+data/train-*/
