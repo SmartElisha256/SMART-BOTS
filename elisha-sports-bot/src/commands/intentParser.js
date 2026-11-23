@@ -31,6 +31,14 @@ export function interpretNaturalLanguage(input) {
   if (/\b(today'?s? tips?|tips today|best pick today|today'?s? best pick|give me a tip|football tip today|today tip)\b/.test(text)) {
     return { command: 'tip', args: null, raw: text };
   }
+  // VALUE / odds check: model vs bookmaker odds (research tool; PASS is normal)
+  if (/^(value|odds check|value bet|valuecheck)\b/.test(text) || /\b(value check|check value|value vs odds)\b/.test(text)) {
+    const args = text
+      .replace(/^(value|odds check|value bet|valuecheck)\s*/i, '')
+      .replace(/^(value check|check value|value vs odds)\s*/i, '')
+      .trim();
+    return { command: 'value', args: args || null, raw: text };
+  }
   if (/\b(live scores?|scores? right now|matches live|what'?s live)\b/.test(text)) {
     const leagueMatch = text.match(new RegExp('\\b(?:in|for)\\s+(' + LEAGUE_PHRASE + ')\\b'));
     return { command: 'live', args: leagueMatch ? normalizeLeagueName(leagueMatch[1]) : null, raw: text };
@@ -98,10 +106,11 @@ export function interpretNaturalLanguage(input) {
   }
 
   const explicitCommand = text.match(COMMAND_REGEX);
-  if (explicitCommand && /^(menu|help|fixtures|live|table|form|h2h|analyze|analysis|season|historical|tip|tips|start|stop|leagues|league|team|myteam|feedback|review|suggestion|report)$/.test(explicitCommand[1])) {
+  if (explicitCommand && /^(menu|help|fixtures|live|table|form|h2h|analyze|analysis|season|historical|tip|tips|start|stop|leagues|league|team|myteam|feedback|review|suggestion|report|value|odds)$/.test(explicitCommand[1])) {
     if (!(explicitCommand[1] === 'form' && /^form of\s+/.test(text))) {
       let cmd = explicitCommand[1];
       if (cmd === 'myteam') cmd = 'team';
+      if (cmd === 'odds') cmd = 'value';
       if (cmd === 'review' || cmd === 'suggestion' || cmd === 'report') cmd = 'feedback';
       return { command: cmd, args: explicitCommand[2] ? explicitCommand[2].trim() : null, raw: text };
     }
