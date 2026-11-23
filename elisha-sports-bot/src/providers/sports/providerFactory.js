@@ -1,5 +1,5 @@
 import { env } from '../../config/env.js';
-import { MockSportsDataProvider } from './mockSportsDataProvider.js';
+import { MockSportsProvider } from './mockSportsProvider.js';
 import { ApiFootballProvider } from './apiFootballProvider.js';
 
 let provider;
@@ -9,7 +9,7 @@ export function getSportsDataProvider() {
     provider = new ApiFootballProvider();
     return provider;
   }
-  provider = new MockSportsDataProvider();
+  provider = new MockSportsProvider();
   return provider;
 }
 
