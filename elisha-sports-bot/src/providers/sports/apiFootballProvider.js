@@ -28,8 +28,8 @@ const LEAGUE_CODES = new Map([
   ['conference league', 'EC'],
   ['major league soccer', 'MLS'],
   ['mls', 'MLS'],
-  ['saudi pro league', 'SA'],
-  ['saudi', 'SA'],
+  // Saudi Pro League is not reliably available on football-data.org free plans.
+  // Do not map 'saudi' to 'SA' — that code is Serie A.
   ['uganda premier league', 'UPL'],
   ['upl', 'UPL']
 ]);
@@ -75,7 +75,6 @@ export class ApiFootballProvider extends SportsDataProvider {
   async _acquireRateSlot() {
     const now = Date.now();
     this._requestTimestamps = this._requestTimestamps.filter((ts) => now - ts < this.rateWindowMs);
-
     if (this._requestTimestamps.length >= this.maxRequestsPerMinute) {
       const oldest = this._requestTimestamps[0];
       const waitMs = this.rateWindowMs - (now - oldest);
@@ -86,39 +85,31 @@ export class ApiFootballProvider extends SportsDataProvider {
       err.code = 'SPORTS_RATE_LIMIT';
       throw err;
     }
-
     this._requestTimestamps.push(now);
   }
 
   async request(path, params = {}, { allowObject = false, _retried = false } = {}) {
     if (!this.apiKey) throw new Error('FOOTBALL_DATA_API_KEY or SPORTS_API_KEY is not configured');
-
     await this._acquireRateSlot();
-
     const url = new URL(`${this.apiBaseUrl}/${path.replace(/^\//, '')}`);
     for (const [key, value] of Object.entries(params)) {
       if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value));
     }
-
     const response = await this.fetchImpl(url, {
       headers: { 'X-Auth-Token': this.apiKey, accept: 'application/json' },
       signal: AbortSignal.timeout(10000)
     });
-
     const available = response.headers?.get?.('X-RequestsAvailable');
     const resetSec = response.headers?.get?.('X-RequestCounter-Reset');
-
     if (response.status === 429) {
       const retryAfterHeader = response.headers?.get?.('Retry-After');
       const retryAfterMs = retryAfterHeader
         ? Math.min(30_000, Math.max(1000, Number(retryAfterHeader) * 1000 || DEFAULT_RETRY_AFTER_MS))
         : (resetSec ? Math.min(30_000, Math.max(1000, Number(resetSec) * 1000 || DEFAULT_RETRY_AFTER_MS)) : DEFAULT_RETRY_AFTER_MS);
-
       if (!_retried) {
         await sleep(retryAfterMs);
         return this.request(path, params, { allowObject, _retried: true });
       }
-
       const waitSec = Math.max(1, Math.ceil(retryAfterMs / 1000));
       const err = new Error(
         `Sports data is temporarily rate-limited by the provider. Please try again in about ${waitSec} second${waitSec === 1 ? '' : 's'}.`
@@ -127,7 +118,6 @@ export class ApiFootballProvider extends SportsDataProvider {
       err.status = 429;
       throw err;
     }
-
     if (!response.ok) {
       if (response.status === 403 || response.status === 401) {
         const err = new Error('Football data API key is missing or rejected. Set FOOTBALL_DATA_API_KEY (free at football-data.org).');
@@ -137,7 +127,6 @@ export class ApiFootballProvider extends SportsDataProvider {
       }
       throw new Error(`Football Data API returned HTTP ${response.status}`);
     }
-
     const body = await response.json();
     if (body?.error || body?.errorCode) {
       const message = body.message || body.error?.message || body.error || 'unknown error';
@@ -150,7 +139,6 @@ export class ApiFootballProvider extends SportsDataProvider {
       }
       throw new Error(`Football Data API rejected the request: ${message}`);
     }
-
     if (Array.isArray(body.matches)) return body.matches;
     if (Array.isArray(body.standings)) return body.standings;
     if (Array.isArray(body.response)) return body.response;
