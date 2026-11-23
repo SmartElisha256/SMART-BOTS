@@ -17,6 +17,7 @@ Available commands:
 • TEAM [NAME] — save favourite team
 • H2H [TEAM A] vs [TEAM B] — head-to-head stats
 • ANALYZE [TEAM A] vs [TEAM B] — Premium ML + context analysis
+• VALUE [HOME] vs [AWAY] [H] [D] [A] — Premium odds value check (paper only; PASS is normal)
 • SEASON [LEAGUE] [YEAR] — historical season summary (Premium)
 • LEAGUES — supported league aliases
 • HELP — usage guide
@@ -51,6 +52,9 @@ FIXTURES / TABLE La Liga / LEAGUES
 
 ANALYZE Arsenal vs Chelsea (Premium)
   ML estimates + context; logged for accuracy tracking.
+
+VALUE Arsenal vs Chelsea 1.80 3.90 4.60 (Premium)
+  Compares model to your book odds. Research tool — backtests show no proven edge; PASS is expected.
 
 UPGRADE
   Day / Week / Month Mobile Money plans. Admin verifies before activation.
